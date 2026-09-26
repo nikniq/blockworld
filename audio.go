@@ -1,0 +1,126 @@
+package main
+
+import (
+	"encoding/binary"
+	"math"
+	"math/rand"
+
+	rl "github.com/gen2brain/raylib-go/raylib"
+)
+
+// Audio holds procedurally synthesised sound effects, so the game needs no
+// asset files. All calls are no-ops if the audio device failed to open.
+type Audio struct {
+	ok       bool
+	Shoot    rl.Sound
+	Click    rl.Sound
+	Hit      rl.Sound
+	Head     rl.Sound
+	Reload   rl.Sound
+	Hurt     rl.Sound
+	Die      rl.Sound
+	Pickup   rl.Sound
+	Wave     rl.Sound
+	Clear    rl.Sound
+	GameOver rl.Sound
+	Dig      rl.Sound
+	Place    rl.Sound
+	sounds   []rl.Sound
+}
+
+const sampleRate = 22050
+
+func NewAudio() *Audio {
+	rl.InitAudioDevice()
+	a := &Audio{ok: rl.IsAudioDeviceReady()}
+	if !a.ok {
+		return a
+	}
+	noise := func() float32 { return rand.Float32()*2 - 1 }
+	sin := func(f, t float32) float32 { return float32(math.Sin(2 * math.Pi * float64(f*t))) }
+	exp := func(k, t float32) float32 { return float32(math.Exp(-float64(k * t))) }
+	saw := func(f, t float32) float32 { x := f * t; return 2*(x-float32(math.Floor(float64(x)))) - 1 }
+
+	a.Shoot = a.synth(0.28, func(t float32) float32 {
+		return (noise()*0.7 + sin(80, t)*0.8 + sin(160, t)*0.3) * exp(22, t)
+	})
+	a.Click = a.synth(0.05, func(t float32) float32 { return noise() * exp(80, t) * 0.4 })
+	a.Hit = a.synth(0.10, func(t float32) float32 { return (sin(520, t) + noise()*0.3) * exp(45, t) * 0.7 })
+	a.Head = a.synth(0.35, func(t float32) float32 { return (sin(1320, t)*0.6 + sin(1980, t)*0.3) * exp(11, t) })
+	a.Reload = a.synth(0.55, func(t float32) float32 {
+		v := float32(0)
+		if t < 0.06 {
+			v = noise() * exp(60, t)
+		}
+		if t > 0.34 {
+			v += noise() * exp(60, t-0.34)
+		}
+		return v * 0.5
+	})
+	a.Hurt = a.synth(0.4, func(t float32) float32 { return (saw(110, t)*0.6 + noise()*0.2) * exp(8, t) })
+	a.Die = a.synth(0.5, func(t float32) float32 {
+		f := 380 - 300*t
+		return (saw(f, t)*0.5 + noise()*0.25) * exp(5, t)
+	})
+	a.Pickup = a.synth(0.36, func(t float32) float32 {
+		notes := []float32{523, 659, 784}
+		i := int(t / 0.12)
+		if i > 2 {
+			i = 2
+		}
+		return sin(notes[i], t) * exp(9, t-float32(i)*0.12) * 0.5
+	})
+	a.Wave = a.synth(0.7, func(t float32) float32 {
+		f := float32(220)
+		if t > 0.3 {
+			f = 330
+		}
+		return (saw(f, t)*0.4 + sin(f/2, t)*0.4) * (1 - t/0.7) * 0.8
+	})
+	a.Clear = a.synth(0.8, func(t float32) float32 {
+		notes := []float32{392, 523, 659, 784}
+		i := min(int(t/0.18), 3)
+		return sin(notes[i], t) * exp(6, t-float32(i)*0.18) * 0.5
+	})
+	a.GameOver = a.synth(1.2, func(t float32) float32 {
+		f := 260 - 180*t
+		return (saw(f, t)*0.5 + sin(f/2, t)*0.4) * exp(2.5, t)
+	})
+	a.Dig = a.synth(0.12, func(t float32) float32 { return (noise()*0.6 + sin(140, t)*0.4) * exp(30, t) * 0.7 })
+	a.Place = a.synth(0.09, func(t float32) float32 { return (sin(420, t)*0.5 + noise()*0.3) * exp(50, t) * 0.6 })
+	return a
+}
+
+// synth renders fn over dur seconds into a 16-bit mono sound.
+func (a *Audio) synth(dur float32, fn func(t float32) float32) rl.Sound {
+	n := int(dur * sampleRate)
+	data := make([]byte, n*2)
+	for i := 0; i < n; i++ {
+		v := clamp(fn(float32(i)/sampleRate), -1, 1)
+		binary.LittleEndian.PutUint16(data[i*2:], uint16(int16(v*32000)))
+	}
+	w := rl.NewWave(uint32(n), sampleRate, 16, 1, data)
+	s := rl.LoadSoundFromWave(w)
+	a.sounds = append(a.sounds, s)
+	return s
+}
+
+// Play triggers s at the given volume with slight random pitch variation.
+func (a *Audio) Play(s rl.Sound, vol float32) {
+	if !a.ok {
+		return
+	}
+	rl.SetSoundVolume(s, vol)
+	rl.SetSoundPitch(s, 0.92+rand.Float32()*0.16)
+	rl.PlaySound(s)
+}
+
+func (a *Audio) Close() {
+	if !a.ok {
+		return
+	}
+	for _, s := range a.sounds {
+		rl.UnloadSound(s)
+	}
+	rl.CloseAudioDevice()
+}
