@@ -76,7 +76,7 @@ func TestNavRefreshOnEdit(t *testing.T) {
 		w.Set(x+1, y, z, b)
 	}
 	for y := h; y < h+2; y++ {
-		w.Set(x, y, z, Brick)
+		w.Set(x, y, z, StoneBrick)
 	}
 	nav.Update(w.SpawnPoint(), w)
 	lx, lz := x-originX, z-originZ
@@ -91,7 +91,10 @@ func TestNavRefreshOnEdit(t *testing.T) {
 // The DDA ray must report the block and entry face correctly.
 func TestRayCastFace(t *testing.T) {
 	w := NewWorld()
-	// Clear a spot and place a known block.
+	// Clear a corridor and place a known block at its end.
+	for z := 0; z <= 5; z++ {
+		w.Set(5, 20, z, Air)
+	}
 	w.Set(5, 20, 5, Stone)
 	h := w.RayCast(rl.NewVector3(5.5, 20.5, 0.5), rl.NewVector3(0, 0, 1), 20)
 	if !h.Hit || h.X != 5 || h.Y != 20 || h.Z != 5 || h.NZ != -1 {

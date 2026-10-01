@@ -14,7 +14,7 @@ func highScorePath() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(dir, "arena-strike", "highscore.txt")
+	return filepath.Join(dir, "blockworld", "highscore.txt")
 }
 
 func loadHighScore() int {
@@ -35,8 +35,8 @@ func loadHighScore() int {
 
 func saveHighScore(n int) {
 	p := highScorePath()
-	if p == "" {
-		return
+	if p == "" || os.Getenv("BLOCKWORLD_SHOTS") != "" || os.Getenv("BLOCKWORLD_SOAK") != "" {
+		return // test harness runs never touch the real high score
 	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return

@@ -1,7 +1,7 @@
-# Arena Strike - build helpers.
+# Blockworld - build helpers.
 # Each target must be run ON that platform (raylib is compiled via cgo).
 
-BIN := arena-strike
+BIN := blockworld
 
 .PHONY: run build build-macos build-linux build-windows clean
 

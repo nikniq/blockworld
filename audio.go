@@ -25,6 +25,17 @@ type Audio struct {
 	GameOver rl.Sound
 	Dig      rl.Sound
 	Place    rl.Sound
+	Explode  rl.Sound
+	Fuse     rl.Sound
+	Craft    rl.Sound
+	Swing    rl.Sound
+	Burn     rl.Sound
+	Splash   rl.Sound
+	Eat      rl.Sound
+	Groan    rl.Sound
+	Rain     rl.Sound
+	Rattle   rl.Sound
+	Steps    [4]rl.Sound // grass, stone, sand, wood
 	sounds   []rl.Sound
 }
 
@@ -88,6 +99,40 @@ func NewAudio() *Audio {
 	})
 	a.Dig = a.synth(0.12, func(t float32) float32 { return (noise()*0.6 + sin(140, t)*0.4) * exp(30, t) * 0.7 })
 	a.Place = a.synth(0.09, func(t float32) float32 { return (sin(420, t)*0.5 + noise()*0.3) * exp(50, t) * 0.6 })
+	a.Explode = a.synth(1.1, func(t float32) float32 {
+		return (noise()*0.9 + sin(45, t)*0.8 + sin(90, t)*0.3) * exp(4, t)
+	})
+	a.Fuse = a.synth(1.4, func(t float32) float32 { return noise() * (0.25 + 0.35*t) * float32(math.Min(1, float64(t*8))) })
+	a.Craft = a.synth(0.3, func(t float32) float32 {
+		v := noise() * exp(40, t) * 0.5
+		if t > 0.12 {
+			v += sin(880, t) * exp(20, t-0.12) * 0.4
+		}
+		return v
+	})
+	a.Swing = a.synth(0.18, func(t float32) float32 { return noise() * exp(18, t) * (0.2 + 0.5*float32(math.Sin(float64(t*17)))) })
+	a.Burn = a.synth(0.4, func(t float32) float32 { return noise() * exp(8, t) * 0.35 })
+	a.Eat = a.synth(0.5, func(t float32) float32 {
+		i := int(t / 0.17)
+		return noise() * exp(25, t-float32(i)*0.17) * 0.4
+	})
+	a.Rain = a.synth(1.0, func(t float32) float32 {
+		env := float32(math.Sin(float64(t * math.Pi)))
+		return noise() * 0.25 * (0.4 + 0.6*env)
+	})
+	a.Groan = a.synth(0.9, func(t float32) float32 {
+		f := 95 - 25*t
+		return (saw(f, t)*0.5 + sin(f*2.01, t)*0.3 + noise()*0.1) * float32(math.Sin(float64(t/0.9*math.Pi))) * 0.6
+	})
+	a.Rattle = a.synth(0.5, func(t float32) float32 {
+		i := int(t / 0.07)
+		return noise() * exp(60, t-float32(i)*0.07) * 0.35
+	})
+	a.Steps[0] = a.synth(0.08, func(t float32) float32 { return (noise()*0.5 + sin(140, t)*0.3) * exp(45, t) * 0.5 })
+	a.Steps[1] = a.synth(0.06, func(t float32) float32 { return (noise()*0.7 + sin(900, t)*0.2) * exp(70, t) * 0.45 })
+	a.Steps[2] = a.synth(0.1, func(t float32) float32 { return noise() * exp(35, t) * 0.35 })
+	a.Steps[3] = a.synth(0.08, func(t float32) float32 { return (sin(210, t)*0.6 + noise()*0.3) * exp(50, t) * 0.5 })
+	a.Splash = a.synth(0.35, func(t float32) float32 { return (noise()*0.6 + sin(300-200*t, t)*0.4) * exp(9, t) * 0.7 })
 	return a
 }
 
@@ -110,7 +155,7 @@ func (a *Audio) Play(s rl.Sound, vol float32) {
 	if !a.ok {
 		return
 	}
-	rl.SetSoundVolume(s, vol)
+	rl.SetSoundVolume(s, vol*settings.Volume)
 	rl.SetSoundPitch(s, 0.92+rand.Float32()*0.16)
 	rl.PlaySound(s)
 }

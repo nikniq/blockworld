@@ -10,12 +10,13 @@ import (
 // The world is a fixed voxel volume. Block coordinates run from originX/originZ
 // (inclusive) to originX+worldW / originZ+worldD (exclusive) on X/Z and 0..worldH on Y.
 const (
-	worldW    = 64
-	worldH    = 32
-	worldD    = 64
+	worldW    = 96
+	worldH    = 48
+	worldD    = 96
 	chunkSize = 16
 	originX   = -worldW / 2
 	originZ   = -worldD / 2
+	seaLevel  = 10 // every air cell at or below this height is filled with water
 )
 
 type Block uint8
@@ -25,77 +26,443 @@ const (
 	Grass
 	Dirt
 	Stone
+	Cobble
 	Sand
-	Wood
+	Gravel
+	Snow
+	Log
 	Leaves
 	Planks
-	Brick
+	StoneBrick
+	Glass
+	Water
+	CoalOre
+	IronOre
+	GoldOre
+	DiamondOre
+	GoldBlock
+	Torch
+	TNT
+	Meat
+	Lava
+	Wool
+	Bed
+	Sapling
+	Ladder
+	BirchLog
+	SpruceLeaves
+	Cactus
+	TallGrass
+	Flower
+	Leather
+	Spawner
+	Crate
 	Bedrock
 	numBlocks
 )
 
+// Pickaxe tiers. Tier 0 is bare hands.
+const (
+	TierHand = iota
+	TierWood
+	TierStone
+	TierIron
+	TierDiamond
+)
+
+var tierNames = [...]string{"", "Wooden", "Stone", "Iron", "Diamond"}
+
 type blockInfo struct {
 	Name              string
-	Top, Side, Bottom rl.Color
-	MineTime          float32 // seconds to break; < 0 means unbreakable
+	Top, Side, Bottom rl.Color // base tints for the generated textures, the UI and the minimap
+	Pat               [3]texPattern
+	Spot              rl.Color // ore fleck colour
+	MineTime          float32  // seconds to break by hand; < 0 means unbreakable
+	Hard              bool     // pickaxe tier speeds up mining
+	MinTier           int      // pickaxe tier required to harvest at all
 	Drops             Block
+	Trans             bool           // rendered in the translucent pass; does not occlude neighbours
+	Solid             bool           // blocks movement
+	Tiny              bool           // drawn as a small box inside the cell (torches); never occludes
+	Emit              uint8          // block light emitted, 0..15
+	Food              int            // health restored when eaten (an item, not a placeable block)
+	Item              bool           // a crafting material that cannot be placed
+	Box               *[2][3]float32 // extents of a Tiny block within its cell (nil: torch size)
+}
+
+var (
+	torchBox   = [2][3]float32{{0.4375, 0, 0.4375}, {0.5625, 0.625, 0.5625}}
+	bedBox     = [2][3]float32{{0, 0, 0}, {1, 0.5, 1}}
+	saplingBox = [2][3]float32{{0.3, 0, 0.3}, {0.7, 0.8, 0.7}}
+	ladderBox  = [2][3]float32{{0.25, 0, 0.25}, {0.75, 1, 0.75}}
+	plantBox   = [2][3]float32{{0.15, 0, 0.15}, {0.85, 0.85, 0.85}}
+)
+
+// Biomes decide the surface blocks and vegetation of a column.
+type Biome uint8
+
+const (
+	BiomePlains Biome = iota
+	BiomeForest
+	BiomeDesert
+	BiomeTaiga
+)
+
+// TinyBox returns the extents of a Tiny block.
+func (b Block) TinyBox() [2][3]float32 {
+	if bx := blocks[b].Box; bx != nil {
+		return *bx
+	}
+	return torchBox
 }
 
 func col(r, g, b uint8) rl.Color { return rl.NewColor(r, g, b, 255) }
 
 var blocks = [numBlocks]blockInfo{
-	Air:     {Name: "Air", MineTime: -1},
-	Grass:   {"Grass", col(106, 170, 64), col(118, 96, 60), col(118, 96, 60), 0.35, Dirt},
-	Dirt:    {"Dirt", col(122, 92, 58), col(122, 92, 58), col(122, 92, 58), 0.3, Dirt},
-	Stone:   {"Stone", col(128, 128, 132), col(122, 122, 126), col(115, 115, 120), 0.9, Stone},
-	Sand:    {"Sand", col(222, 208, 150), col(214, 200, 142), col(205, 190, 135), 0.3, Sand},
-	Wood:    {"Wood", col(160, 130, 78), col(102, 76, 44), col(160, 130, 78), 0.6, Wood},
-	Leaves:  {"Leaves", col(62, 138, 52), col(56, 126, 48), col(50, 110, 42), 0.2, Leaves},
-	Planks:  {"Planks", col(184, 146, 86), col(176, 138, 80), col(168, 130, 74), 0.5, Planks},
-	Brick:   {"Brick", col(160, 84, 72), col(152, 78, 66), col(140, 70, 60), 1.0, Brick},
-	Bedrock: {"Bedrock", col(40, 40, 46), col(40, 40, 46), col(40, 40, 46), -1, Bedrock},
+	Air: {Name: "Air", MineTime: -1},
+	Grass: {Name: "Grass", Top: col(112, 176, 66), Side: col(124, 92, 58), Bottom: col(124, 92, 58),
+		Pat: [3]texPattern{PatGrassTop, PatGrassSide, PatNoise}, MineTime: 0.6, Drops: Dirt, Solid: true},
+	Dirt: {Name: "Dirt", Top: col(124, 92, 58), Side: col(124, 92, 58), Bottom: col(124, 92, 58),
+		Pat: [3]texPattern{PatNoise, PatNoise, PatNoise}, MineTime: 0.5, Drops: Dirt, Solid: true},
+	Stone: {Name: "Stone", Top: col(128, 128, 130), Side: col(125, 125, 128), Bottom: col(120, 120, 124),
+		Pat: [3]texPattern{PatNoise, PatNoise, PatNoise}, MineTime: 3.0, Hard: true, Drops: Cobble, Solid: true},
+	Cobble: {Name: "Cobblestone", Top: col(118, 118, 120), Side: col(118, 118, 120), Bottom: col(110, 110, 112),
+		Pat: [3]texPattern{PatCobble, PatCobble, PatCobble}, MineTime: 3.0, Hard: true, Drops: Cobble, Solid: true},
+	Sand: {Name: "Sand", Top: col(222, 208, 150), Side: col(216, 202, 144), Bottom: col(208, 194, 138),
+		Pat: [3]texPattern{PatSand, PatSand, PatSand}, MineTime: 0.5, Drops: Sand, Solid: true},
+	Gravel: {Name: "Gravel", Top: col(132, 126, 122), Side: col(132, 126, 122), Bottom: col(126, 120, 116),
+		Pat: [3]texPattern{PatGravel, PatGravel, PatGravel}, MineTime: 0.6, Drops: Gravel, Solid: true},
+	Snow: {Name: "Snow", Top: col(240, 244, 250), Side: col(124, 92, 58), Bottom: col(124, 92, 58),
+		Pat: [3]texPattern{PatSand, PatSnowSide, PatNoise}, MineTime: 0.5, Drops: Dirt, Solid: true},
+	Log: {Name: "Oak Log", Top: col(172, 140, 86), Side: col(104, 78, 46), Bottom: col(172, 140, 86),
+		Pat: [3]texPattern{PatLogTop, PatLogSide, PatLogTop}, MineTime: 1.5, Drops: Log, Solid: true},
+	Leaves: {Name: "Leaves", Top: col(58, 132, 48), Side: col(54, 124, 46), Bottom: col(48, 110, 42),
+		Pat: [3]texPattern{PatLeaves, PatLeaves, PatLeaves}, MineTime: 0.3, Drops: Leaves, Solid: true},
+	Planks: {Name: "Oak Planks", Top: col(186, 148, 88), Side: col(180, 142, 82), Bottom: col(172, 134, 76),
+		Pat: [3]texPattern{PatPlanks, PatPlanks, PatPlanks}, MineTime: 1.2, Drops: Planks, Solid: true},
+	StoneBrick: {Name: "Stone Bricks", Top: col(122, 122, 126), Side: col(122, 122, 126), Bottom: col(116, 116, 120),
+		Pat: [3]texPattern{PatBricks, PatBricks, PatBricks}, MineTime: 3.0, Hard: true, Drops: StoneBrick, Solid: true},
+	Glass: {Name: "Glass", Top: col(200, 230, 240), Side: col(200, 230, 240), Bottom: col(200, 230, 240),
+		Pat: [3]texPattern{PatGlass, PatGlass, PatGlass}, MineTime: 0.4, Drops: Glass, Trans: true, Solid: true},
+	Water: {Name: "Water", Top: col(40, 90, 200), Side: col(40, 90, 200), Bottom: col(40, 90, 200),
+		Pat: [3]texPattern{PatWater, PatWater, PatWater}, MineTime: -1, Trans: true},
+	CoalOre: {Name: "Coal Ore", Top: col(125, 125, 128), Side: col(125, 125, 128), Bottom: col(125, 125, 128),
+		Pat: [3]texPattern{PatOre, PatOre, PatOre}, Spot: col(28, 28, 30), MineTime: 4.5, Hard: true, Drops: CoalOre, Solid: true},
+	IronOre: {Name: "Iron Ore", Top: col(125, 125, 128), Side: col(125, 125, 128), Bottom: col(125, 125, 128),
+		Pat: [3]texPattern{PatOre, PatOre, PatOre}, Spot: col(214, 170, 140), MineTime: 4.5, Hard: true, MinTier: TierStone, Drops: IronOre, Solid: true},
+	GoldOre: {Name: "Gold Ore", Top: col(125, 125, 128), Side: col(125, 125, 128), Bottom: col(125, 125, 128),
+		Pat: [3]texPattern{PatOre, PatOre, PatOre}, Spot: col(250, 214, 70), MineTime: 4.5, Hard: true, MinTier: TierIron, Drops: GoldOre, Solid: true},
+	DiamondOre: {Name: "Diamond Ore", Top: col(125, 125, 128), Side: col(125, 125, 128), Bottom: col(125, 125, 128),
+		Pat: [3]texPattern{PatOre, PatOre, PatOre}, Spot: col(96, 236, 232), MineTime: 4.5, Hard: true, MinTier: TierIron, Drops: DiamondOre, Solid: true},
+	GoldBlock: {Name: "Gold Block", Top: col(248, 210, 60), Side: col(244, 200, 52), Bottom: col(236, 190, 48),
+		Pat: [3]texPattern{PatGold, PatGold, PatGold}, MineTime: 4.5, Hard: true, Drops: GoldBlock, Solid: true},
+	Torch: {Name: "Torch", Top: col(255, 200, 60), Side: col(110, 80, 40), Bottom: col(90, 65, 30),
+		Pat: [3]texPattern{PatSand, PatTorch, PatNoise}, MineTime: 0.05, Drops: Torch, Tiny: true, Emit: 14},
+	TNT: {Name: "TNT", Top: col(200, 50, 40), Side: col(200, 50, 40), Bottom: col(200, 50, 40),
+		Pat: [3]texPattern{PatTNTTop, PatTNT, PatTNTTop}, MineTime: 0.3, Drops: TNT, Solid: true},
+	Meat: {Name: "Raw Meat", Top: col(215, 90, 90), Side: col(215, 90, 90), Bottom: col(215, 90, 90),
+		Pat: [3]texPattern{PatMeat, PatMeat, PatMeat}, MineTime: 0.1, Drops: Meat, Food: 30},
+	Lava: {Name: "Lava", Top: col(240, 110, 20), Side: col(230, 95, 15), Bottom: col(200, 80, 10),
+		Pat: [3]texPattern{PatLava, PatLava, PatLava}, MineTime: -1, Emit: 15},
+	Wool: {Name: "Wool", Top: col(235, 235, 230), Side: col(228, 228, 222), Bottom: col(220, 220, 215),
+		Pat: [3]texPattern{PatWool, PatWool, PatWool}, MineTime: 0.6, Drops: Wool, Solid: true},
+	Bed: {Name: "Bed", Top: col(190, 40, 40), Side: col(150, 110, 70), Bottom: col(150, 110, 70),
+		Pat: [3]texPattern{PatBedTop, PatPlanks, PatPlanks}, MineTime: 0.3, Drops: Bed, Tiny: true, Box: &bedBox},
+	Sapling: {Name: "Oak Sapling", Top: col(70, 140, 50), Side: col(70, 140, 50), Bottom: col(90, 70, 40),
+		Pat: [3]texPattern{PatSapling, PatSapling, PatNoise}, MineTime: 0.05, Drops: Sapling, Tiny: true, Box: &saplingBox},
+	Ladder: {Name: "Ladder", Top: col(160, 120, 70), Side: col(160, 120, 70), Bottom: col(160, 120, 70),
+		Pat: [3]texPattern{PatLadder, PatLadder, PatLadder}, MineTime: 0.3, Drops: Ladder, Tiny: true, Box: &ladderBox},
+	BirchLog: {Name: "Birch Log", Top: col(200, 190, 150), Side: col(225, 225, 215), Bottom: col(200, 190, 150),
+		Pat: [3]texPattern{PatLogTop, PatBirchSide, PatLogTop}, MineTime: 1.5, Drops: BirchLog, Solid: true},
+	SpruceLeaves: {Name: "Spruce Leaves", Top: col(40, 90, 50), Side: col(36, 84, 46), Bottom: col(30, 72, 40),
+		Pat: [3]texPattern{PatLeaves, PatLeaves, PatLeaves}, MineTime: 0.3, Drops: SpruceLeaves, Solid: true},
+	Cactus: {Name: "Cactus", Top: col(90, 150, 60), Side: col(70, 130, 50), Bottom: col(90, 150, 60),
+		Pat: [3]texPattern{PatCactusTop, PatCactus, PatCactusTop}, MineTime: 0.4, Drops: Cactus, Solid: true},
+	TallGrass: {Name: "Tall Grass", Top: col(100, 170, 60), Side: col(100, 170, 60), Bottom: col(100, 170, 60),
+		Pat: [3]texPattern{PatTuft, PatTuft, PatTuft}, MineTime: 0.05, Tiny: true, Box: &plantBox},
+	Flower: {Name: "Flower", Top: col(230, 60, 60), Side: col(230, 60, 60), Bottom: col(230, 60, 60),
+		Pat: [3]texPattern{PatFlower, PatFlower, PatFlower}, MineTime: 0.05, Drops: Flower, Tiny: true, Box: &plantBox},
+	Leather: {Name: "Leather", Top: col(150, 95, 55), Side: col(150, 95, 55), Bottom: col(150, 95, 55),
+		Pat: [3]texPattern{PatNoise, PatNoise, PatNoise}, MineTime: 0.1, Drops: Leather, Item: true},
+	Spawner: {Name: "Monster Spawner", Top: col(40, 44, 50), Side: col(40, 44, 50), Bottom: col(40, 44, 50),
+		Pat: [3]texPattern{PatSpawner, PatSpawner, PatSpawner}, MineTime: 6, Hard: true, Drops: Air, Solid: true},
+	Crate: {Name: "Loot Crate", Top: col(170, 130, 70), Side: col(160, 120, 65), Bottom: col(150, 110, 60),
+		Pat: [3]texPattern{PatCrate, PatCrate, PatCrate}, MineTime: 0.8, Drops: Air, Solid: true},
+	Bedrock: {Name: "Bedrock", Top: col(70, 70, 76), Side: col(70, 70, 76), Bottom: col(70, 70, 76),
+		Pat: [3]texPattern{PatBedrock, PatBedrock, PatBedrock}, MineTime: -1, Drops: Bedrock, Solid: true},
 }
 
-type chunk struct {
+// Opaque reports whether a block hides the faces of its neighbours.
+func (b Block) Opaque() bool { return b != Air && !blocks[b].Trans && !blocks[b].Tiny }
+
+// lightCost is how much light fades passing through a block; 0 means it is opaque to light.
+func (b Block) lightCost() uint8 {
+	switch {
+	case b == Air || blocks[b].Tiny || b == Glass || b == Lava:
+		return 1
+	case b == Water || b == Leaves || b == SpruceLeaves:
+		return 2
+	}
+	return 0
+}
+
+// Placeable reports whether the player may hold and place this block.
+func (b Block) Placeable() bool {
+	return b != Air && b != Water && b != Lava && blocks[b].Food == 0 && !blocks[b].Item
+}
+
+// Liquid reports whether a block is water or lava: not solid, swimmable, replaceable.
+func (b Block) Liquid() bool { return b == Water || b == Lava }
+
+type meshBuf struct {
 	mesh   rl.Mesh
 	loaded bool
-	dirty  bool
 	verts  []float32
 	norms  []float32
+	uvs    []float32
 	cols   []uint8
 }
 
-// World holds the voxel volume, per-column surface heights and chunk meshes.
+// chunk owns two meshes. Each meshBuf is its own heap object: cgo's pointer
+// check scans the whole object around a mesh, so nothing else may live beside it.
+type chunk struct {
+	opaque *meshBuf
+	trans  *meshBuf
+	dirty  bool
+}
+
+// Env is the per-frame lighting and fog state pushed to the world shader.
+type Env struct {
+	Light            float32
+	Fog              rl.Color
+	FogStart, FogEnd float32
+}
+
+// World holds the voxel volume, per-column heights and chunk meshes.
 type World struct {
 	Blocks  []Block
-	Height  []int // per column (z*worldW+x): feet level of the surface, i.e. highest solid + 1
-	Version int   // bumped on every block change; the nav grid watches it
-	Half    float32
+	Height  []int        // per column (z*worldW+x): top of the column (highest non-air, including water) + 1
+	Ground  []int        // per column: feet level on the highest solid block
+	Light   []uint8      // per cell: sunlight in the high nibble, block light in the low nibble
+	Version int          // bumped on every block change; the nav grid watches it
+	relight map[int]bool // chunks whose lighting must be recomputed
 	chunks  []*chunk
 	ncx     int
 	ncz     int
-	mat     rl.Material
-	matOK   bool
+
+	gpu      bool // GPU resources created
+	tex      rl.Texture2D
+	mat      rl.Material
+	shader   rl.Shader // terrain
+	eshader  rl.Shader // entities
+	shaderOK bool
+	locView  int32
+	locFog   int32
+	locFogS  int32
+	locFogE  int32
+	locLight int32
+	elocView int32
+	elocFog  int32
+	elocFogS int32
+	elocFogE int32
+	blockM   map[Block]*meshBuf // unit cube meshes for item drops
 }
 
 func NewWorld() *World {
-	w := &World{
-		Blocks: make([]Block, worldW*worldH*worldD),
-		Height: make([]int, worldW*worldD),
-		Half:   worldW / 2,
-		ncx:    worldW / chunkSize,
-		ncz:    worldD / chunkSize,
-	}
-	for i := 0; i < w.ncx*w.ncz; i++ {
-		w.chunks = append(w.chunks, &chunk{dirty: true})
-	}
+	w := newEmptyWorld()
 	w.generate(rand.Int())
+	w.finish()
+	return w
+}
+
+// NewWorldFromBlocks rebuilds a world from a saved voxel volume.
+func NewWorldFromBlocks(blocks []Block) *World {
+	w := newEmptyWorld()
+	copy(w.Blocks, blocks)
+	w.finish()
+	return w
+}
+
+func (w *World) finish() {
 	for z := 0; z < worldD; z++ {
 		for x := 0; x < worldW; x++ {
 			w.recomputeHeight(x, z)
 		}
 	}
+	w.relightRegion(0, 0, worldW, worldD)
+}
+
+func newEmptyWorld() *World {
+	w := &World{
+		Blocks:  make([]Block, worldW*worldH*worldD),
+		Height:  make([]int, worldW*worldD),
+		Ground:  make([]int, worldW*worldD),
+		Light:   make([]uint8, worldW*worldH*worldD),
+		relight: map[int]bool{},
+		ncx:     worldW / chunkSize,
+		ncz:     worldD / chunkSize,
+		blockM:  map[Block]*meshBuf{},
+	}
+	for i := 0; i < w.ncx*w.ncz; i++ {
+		w.chunks = append(w.chunks, &chunk{opaque: &meshBuf{}, trans: &meshBuf{}, dirty: true})
+	}
 	return w
+}
+
+// ---------- lighting ----------
+
+func cellIndex(x, y, z int) int { return (y*worldD+z)*worldW + x }
+
+// sunLocal and blockLocal return the two light channels of a local cell (full sun outside the volume).
+func (w *World) sunLocal(x, y, z int) int {
+	if !inLocal(x, y, z) {
+		return 15
+	}
+	return int(w.Light[cellIndex(x, y, z)] >> 4)
+}
+
+func (w *World) blockLocal(x, y, z int) int {
+	if !inLocal(x, y, z) {
+		return 0
+	}
+	return int(w.Light[cellIndex(x, y, z)] & 15)
+}
+
+// Luminance returns the brightness factor at a world position for the given daylight.
+func (w *World) Luminance(p rl.Vector3, daylight float32) float32 {
+	lx, y, lz := floorI(p.X)-originX, floorI(p.Y), floorI(p.Z)-originZ
+	sun := float32(w.sunLocal(lx, y, lz)) / 15 * daylight
+	blk := float32(w.blockLocal(lx, y, lz)) / 15
+	return brightness(max(sun, blk))
+}
+
+// brightness maps a light level in 0..1 to a colour multiplier; mirrors the shader.
+func brightness(l float32) float32 { return 0.03 + 0.97*l*l }
+
+// relightRegion recomputes both light channels for the local columns
+// [x0,x1) x [z0,z1) over the full height, seeded by sky exposure, torches and
+// the light already present just outside the region. Chunks whose light
+// changed are marked for re-meshing.
+func (w *World) relightRegion(x0, z0, x1, z1 int) {
+	x0, z0 = max(x0, 0), max(z0, 0)
+	x1, z1 = min(x1, worldW), min(z1, worldD)
+	if x0 >= x1 || z0 >= z1 {
+		return
+	}
+	inRegion := func(x, z int) bool { return x >= x0 && x < x1 && z >= z0 && z < z1 }
+	old := make([]uint8, 0, (x1-x0)*(z1-z0)*worldH)
+	for y := 0; y < worldH; y++ {
+		for z := z0; z < z1; z++ {
+			for x := x0; x < x1; x++ {
+				i := cellIndex(x, y, z)
+				old = append(old, w.Light[i])
+				w.Light[i] = 0
+			}
+		}
+	}
+	var queue []int32
+	// Sunlight falls straight down through air until it hits anything.
+	for z := z0; z < z1; z++ {
+		for x := x0; x < x1; x++ {
+			for y := worldH - 1; y >= 0; y-- {
+				b := w.getLocal(x, y, z)
+				if b != Air && !blocks[b].Tiny {
+					break
+				}
+				w.Light[cellIndex(x, y, z)] = 15 << 4
+				queue = append(queue, int32(cellIndex(x, y, z)))
+			}
+		}
+	}
+	// Light flowing in from the surrounding columns.
+	border := func(x, z int) {
+		if x < 0 || z < 0 || x >= worldW || z >= worldD {
+			return
+		}
+		for y := 0; y < worldH; y++ {
+			if w.Light[cellIndex(x, y, z)] != 0 {
+				queue = append(queue, int32(cellIndex(x, y, z)))
+			}
+		}
+	}
+	for x := x0 - 1; x <= x1; x++ {
+		border(x, z0-1)
+		border(x, z1)
+	}
+	for z := z0; z < z1; z++ {
+		border(x0-1, z)
+		border(x1, z)
+	}
+	// Torches.
+	for y := 0; y < worldH; y++ {
+		for z := z0; z < z1; z++ {
+			for x := x0; x < x1; x++ {
+				if e := blocks[w.getLocal(x, y, z)].Emit; e > 0 {
+					i := cellIndex(x, y, z)
+					w.Light[i] = w.Light[i]&0xf0 | e
+					queue = append(queue, int32(i))
+				}
+			}
+		}
+	}
+	// Breadth-first spread of both channels; cells outside the region are read but never written.
+	dirs := [6][3]int{{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}}
+	for head := 0; head < len(queue); head++ {
+		i := int(queue[head])
+		x := i % worldW
+		z := (i / worldW) % worldD
+		y := i / (worldW * worldD)
+		v := w.Light[i]
+		sun, blk := int(v>>4), int(v&15)
+		if sun <= 1 && blk <= 1 {
+			continue
+		}
+		for _, d := range dirs {
+			nx, ny, nz := x+d[0], y+d[1], z+d[2]
+			if ny < 0 || ny >= worldH || !inRegion(nx, nz) {
+				continue
+			}
+			cost := int(w.getLocal(nx, ny, nz).lightCost())
+			if cost == 0 {
+				continue
+			}
+			ni := cellIndex(nx, ny, nz)
+			nv := w.Light[ni]
+			ns, nb := max(int(nv>>4), sun-cost), max(int(nv&15), blk-cost)
+			if ns != int(nv>>4) || nb != int(nv&15) {
+				w.Light[ni] = uint8(ns<<4 | nb)
+				queue = append(queue, int32(ni))
+			}
+		}
+	}
+	// Re-mesh every chunk whose light changed.
+	k := 0
+	for y := 0; y < worldH; y++ {
+		for z := z0; z < z1; z++ {
+			for x := x0; x < x1; x++ {
+				if old[k] != w.Light[cellIndex(x, y, z)] {
+					w.chunks[(z/chunkSize)*w.ncx+x/chunkSize].dirty = true
+				}
+				k++
+			}
+		}
+	}
+}
+
+// flushLight recomputes lighting around every chunk edited since the last frame.
+func (w *World) flushLight() {
+	if len(w.relight) == 0 {
+		return
+	}
+	cx0, cz0, cx1, cz1 := w.ncx, w.ncz, -1, -1
+	for ci := range w.relight {
+		i, j := ci%w.ncx, ci/w.ncx
+		cx0, cz0 = min(cx0, i), min(cz0, j)
+		cx1, cz1 = max(cx1, i), max(cz1, j)
+	}
+	w.relight = map[int]bool{}
+	// Light travels at most 15 blocks, so one chunk of margin is enough.
+	w.relightRegion((cx0-1)*chunkSize, (cz0-1)*chunkSize, (cx1+2)*chunkSize, (cz1+2)*chunkSize)
 }
 
 // ---------- generation ----------
@@ -107,118 +474,347 @@ func hash2(x, y, seed int) float32 {
 	return float32(h&0xffff) / 65535
 }
 
-// vnoise is smooth value noise in [0,1].
+func smooth(f float32) float32 { return f * f * (3 - 2*f) }
+
+// vnoise is smooth 2D value noise in [0,1].
 func vnoise(x, y float32, seed int) float32 {
-	xi, yi := int(math.Floor(float64(x))), int(math.Floor(float64(y)))
-	fx, fy := x-float32(xi), y-float32(yi)
-	fx, fy = fx*fx*(3-2*fx), fy*fy*(3-2*fy)
+	xi, yi := floorI(x), floorI(y)
+	fx, fy := smooth(x-float32(xi)), smooth(y-float32(yi))
 	a, b := hash2(xi, yi, seed), hash2(xi+1, yi, seed)
 	c, d := hash2(xi, yi+1, seed), hash2(xi+1, yi+1, seed)
 	return lerp(lerp(a, b, fx), lerp(c, d, fx), fy)
 }
 
+// vnoise3 is smooth 3D value noise in [0,1], used to carve caves.
+func vnoise3(x, y, z float32, seed int) float32 {
+	xi, yi, zi := floorI(x), floorI(y), floorI(z)
+	fx, fy, fz := smooth(x-float32(xi)), smooth(y-float32(yi)), smooth(z-float32(zi))
+	h := func(dx, dy, dz int) float32 { return hash2(xi+dx, (yi+dy)*1013+zi+dz, seed) }
+	c00 := lerp(h(0, 0, 0), h(1, 0, 0), fx)
+	c10 := lerp(h(0, 1, 0), h(1, 1, 0), fx)
+	c01 := lerp(h(0, 0, 1), h(1, 0, 1), fx)
+	c11 := lerp(h(0, 1, 1), h(1, 1, 1), fx)
+	return lerp(lerp(c00, c10, fy), lerp(c01, c11, fy), fz)
+}
+
+// biomeAt picks the biome of a local column from a slow noise field.
+func biomeAt(x, z int, seed int) Biome {
+	b := vnoise(float32(x)/45+300, float32(z)/45+300, seed+20)
+	switch {
+	case b < 0.3:
+		return BiomeDesert
+	case b < 0.5:
+		return BiomePlains
+	case b < 0.74:
+		return BiomeForest
+	}
+	return BiomeTaiga
+}
+
 func (w *World) generate(seed int) {
-	// Terrain.
+	heights := make([]int, worldW*worldD)
+	biomes := make([]Biome, worldW*worldD)
+	// Terrain: rolling hills, a mountain band, beaches and a sea.
 	for z := 0; z < worldD; z++ {
 		for x := 0; x < worldW; x++ {
 			fx, fz := float32(x), float32(z)
-			n := 0.55*vnoise(fx/16, fz/16, seed) + 0.3*vnoise(fx/7+50, fz/7+50, seed+1) + 0.15*vnoise(fx/3+90, fz/3+90, seed+2)
-			h := 6 + int(n*13)
-			// Flatten the middle so the player spawn is open.
-			dx, dz := float32(x+originX), float32(z+originZ)
-			if d := float32(math.Sqrt(float64(dx*dx + dz*dz))); d < 9 {
-				t := clamp(d/9, 0, 1)
-				h = int(lerp(10, float32(h), t*t))
+			n := 0.5*vnoise(fx/40, fz/40, seed) + 0.3*vnoise(fx/14+50, fz/14+50, seed+1) +
+				0.15*vnoise(fx/6+90, fz/6+90, seed+2) + 0.05*vnoise(fx/3+130, fz/3+130, seed+3)
+			h := 5 + int(n*n*30+n*6)
+			if m := vnoise(fx/30+200, fz/30+200, seed+4); m > 0.62 {
+				h += int((m - 0.62) * 50)
 			}
+			// Flatten the middle so the player spawn is open and dry.
+			dx, dz := float32(x+originX), float32(z+originZ)
+			if d := float32(math.Sqrt(float64(dx*dx + dz*dz))); d < 10 {
+				t := clamp(d/10, 0, 1)
+				h = int(lerp(14, float32(h), t*t))
+			}
+			h = int(clamp(float32(h), 5, worldH-6))
+			heights[z*worldW+x] = h
+			biome := biomeAt(x, z, seed)
+			biomes[z*worldW+x] = biome
+			sandy := h <= seaLevel+2 || biome == BiomeDesert
 			for y := 0; y < h; y++ {
 				b := Stone
 				switch {
-				case y == 0:
+				case y == 0 || (y == 1 && hash2(x, z, seed+7) < 0.4):
 					b = Bedrock
 				case y == h-1:
 					b = Grass
-					if h <= 8 {
+					if sandy {
 						b = Sand
+					} else if h >= 34 || (biome == BiomeTaiga && h >= 20) {
+						b = Snow
 					}
 				case y >= h-4:
 					b = Dirt
-					if h <= 8 {
+					if sandy {
 						b = Sand
+					}
+				default:
+					if vnoise3(fx/7, float32(y)/7, fz/7, seed+5) > 0.8 {
+						b = Gravel
 					}
 				}
 				w.setLocal(x, y, z, b)
 			}
+			for y := h; y <= seaLevel; y++ {
+				w.setLocal(x, y, z, Water)
+			}
 		}
 	}
-	// Trees.
-	for i := 0; i < 70; i++ {
+	// Caves: winding tunnels where two noise fields cross, plus a few caverns.
+	for z := 0; z < worldD; z++ {
+		for x := 0; x < worldW; x++ {
+			h := heights[z*worldW+x]
+			top := h - 1
+			if h <= seaLevel+1 {
+				top = h - 4 // keep the sea floor watertight
+			}
+			for y := 2; y < top; y++ {
+				fx, fy, fz := float32(x), float32(y), float32(z)
+				a := vnoise3(fx/12, fy/9, fz/12, seed+11)
+				b := vnoise3(fx/12+70, fy/9, fz/12+70, seed+12)
+				tunnel := math.Abs(float64(a-0.5)) < 0.05 && math.Abs(float64(b-0.5)) < 0.05
+				cavern := vnoise3(fx/10+140, fy/6, fz/10+140, seed+13) > 0.76
+				if tunnel || cavern {
+					w.setLocal(x, y, z, Air)
+				}
+			}
+		}
+	}
+	// Lava pools at the bottom of the deepest caves.
+	for z := 0; z < worldD; z++ {
+		for x := 0; x < worldW; x++ {
+			for y := 1; y <= 5; y++ {
+				if w.getLocal(x, y, z) == Air && heights[z*worldW+x] > y+3 {
+					w.setLocal(x, y, z, Lava)
+				}
+			}
+		}
+	}
+	// Ore veins, deeper ores rarer.
+	vein := func(ore Block, count, minY, maxY, size int) {
+		for i := 0; i < count; i++ {
+			x, z := rand.Intn(worldW), rand.Intn(worldD)
+			y := minY + rand.Intn(maxY-minY+1)
+			for j := 0; j < size; j++ {
+				if w.getLocal(x, y, z) == Stone {
+					w.setLocal(x, y, z, ore)
+				}
+				x += rand.Intn(3) - 1
+				y += rand.Intn(3) - 1
+				z += rand.Intn(3) - 1
+			}
+		}
+	}
+	vein(CoalOre, 300, 4, 42, 9)
+	vein(IronOre, 190, 2, 28, 6)
+	vein(GoldOre, 70, 2, 16, 5)
+	vein(DiamondOre, 40, 1, 9, 4)
+	// Trees, cacti and ground cover by biome.
+	for i := 0; i < 900; i++ {
 		x, z := rand.Intn(worldW-4)+2, rand.Intn(worldD-4)+2
-		if dx, dz := x+originX, z+originZ; dx*dx+dz*dz < 64 {
+		if dx, dz := x+originX, z+originZ; dx*dx+dz*dz < 49 {
 			continue
 		}
-		h := w.surfaceLocal(x, z)
-		if w.getLocal(x, h-1, z) != Grass {
+		h := heights[z*worldW+x]
+		top := w.getLocal(x, h-1, z)
+		if w.getLocal(x, h, z) != Air {
 			continue
 		}
-		th := 4 + rand.Intn(3)
-		for y := h; y < h+th; y++ {
-			w.setLocal(x, y, z, Wood)
-		}
-		top := h + th - 1
-		for dy := -2; dy <= 1; dy++ {
-			r := 2
-			if dy == 1 {
-				r = 1
-			}
-			for dz := -r; dz <= r; dz++ {
-				for dx := -r; dx <= r; dx++ {
-					if abs(dx) == 2 && abs(dz) == 2 {
-						continue
-					}
-					if w.getLocal(x+dx, top+dy, z+dz) == Air {
-						w.setLocal(x+dx, top+dy, z+dz, Leaves)
-					}
+		r := rand.Float32()
+		switch biomes[z*worldW+x] {
+		case BiomeDesert:
+			if top == Sand && h > seaLevel+1 && r < 0.12 {
+				for y := h; y < h+1+rand.Intn(3); y++ {
+					w.setLocal(x, y, z, Cactus)
 				}
+			}
+		case BiomePlains:
+			switch {
+			case top == Grass && r < 0.04:
+				w.placeTree(x, h, z, w.setLocal)
+			case top == Grass && r < 0.45:
+				w.setLocal(x, h, z, TallGrass)
+			case top == Grass && r < 0.55:
+				w.setLocal(x, h, z, Flower)
+			}
+		case BiomeForest:
+			switch {
+			case top == Grass && r < 0.3:
+				w.placeTree(x, h, z, w.setLocal)
+			case top == Grass && r < 0.42:
+				w.placeBirch(x, h, z, w.setLocal)
+			case top == Grass && r < 0.6:
+				w.setLocal(x, h, z, TallGrass)
+			}
+		case BiomeTaiga:
+			if (top == Grass || top == Snow) && r < 0.3 {
+				w.placeSpruce(x, h, z, w.setLocal)
 			}
 		}
 	}
-	// Brick ruins for cover.
-	for _, c := range [][2]int{{-18, -18}, {18, -18}, {-18, 18}, {18, 18}, {0, -22}, {0, 22}, {-24, 0}, {24, 0}} {
-		x, z := c[0]-originX, c[1]-originZ
-		h := w.surfaceLocal(x, z)
-		for dz := -2; dz <= 2; dz++ {
-			for dx := -2; dx <= 2; dx++ {
-				edge := abs(dx) == 2 || abs(dz) == 2
-				if !edge {
-					continue
-				}
-				// Leave door gaps in the middle of two sides.
-				if (dx == 0 && dz == 2) || (dz == 0 && dx == -2) {
-					continue
-				}
-				for y := h - 1; y < h+3; y++ {
-					if y >= 0 {
-						w.setLocal(x+dx, y, z+dz, Brick)
+	// Dungeons: dark cobblestone rooms deep underground with a spawner and loot.
+	for i := 0; i < 7; i++ {
+		x, z := rand.Intn(worldW-12)+6, rand.Intn(worldD-12)+6
+		if dx, dz := x+originX, z+originZ; dx*dx+dz*dz < 144 {
+			continue
+		}
+		y := 5 + rand.Intn(12)
+		if heights[z*worldW+x] < y+8 {
+			continue
+		}
+		for dz := -3; dz <= 3; dz++ {
+			for dx := -3; dx <= 3; dx++ {
+				for dy := -1; dy <= 4; dy++ {
+					wall := abs(dx) == 3 || abs(dz) == 3 || dy == -1 || dy == 4
+					b := Air
+					if wall {
+						b = Cobble
+						if hash2(x+dx, (y+dy)*131+z+dz, seed+15) < 0.35 {
+							b = StoneBrick
+						}
 					}
+					w.setLocal(x+dx, y+dy, z+dz, b)
 				}
 			}
 		}
-		// Floor under the ruin so it doesn't float on slopes.
+		w.setLocal(x, y, z, Spawner)
+		w.setLocal(x-2, y, z-2, Crate)
+		if rand.Intn(2) == 0 {
+			w.setLocal(x+2, y, z+2, Crate)
+		}
+		// One doorway so cave explorers can find it.
+		w.setLocal(x+3, y, z, Air)
+		w.setLocal(x+3, y+1, z, Air)
+	}
+	// Stone-brick ruins for cover.
+	for _, c := range [][2]int{{-22, -22}, {22, -22}, {-22, 22}, {22, 22}, {0, -30}, {0, 30}, {-32, 0}, {32, 0}, {-14, 34}, {36, -14}} {
+		x, z := c[0]-originX, c[1]-originZ
+		h := heights[z*worldW+x]
+		if h <= seaLevel+1 {
+			continue
+		}
 		for dz := -2; dz <= 2; dz++ {
 			for dx := -2; dx <= 2; dx++ {
 				for y := 0; y < h; y++ {
-					if w.getLocal(x+dx, y, z+dz) == Air {
+					if w.getLocal(x+dx, y, z+dz) == Air || w.getLocal(x+dx, y, z+dz) == Water {
 						w.setLocal(x+dx, y, z+dz, Stone)
 					}
 				}
-				for y := h; y < h+3; y++ {
-					if abs(dx) < 2 && abs(dz) < 2 {
-						w.setLocal(x+dx, y, z+dz, Air)
+				w.setLocal(x+dx, h-1, z+dz, Cobble)
+				for y := h; y < h+4; y++ {
+					w.setLocal(x+dx, y, z+dz, Air)
+				}
+				edge := abs(dx) == 2 || abs(dz) == 2
+				door := (dx == 0 && dz == 2) || (dz == 0 && dx == -2)
+				if edge && !door {
+					for y := h; y < h+3; y++ {
+						if y == h+2 && hash2(x+dx, z+dz, seed+9) < 0.3 {
+							continue // crumbled top
+						}
+						w.setLocal(x+dx, y, z+dz, StoneBrick)
 					}
 				}
 			}
 		}
 	}
+}
+
+// placeTree writes an oak with its trunk base at local (x, y, z) through set.
+func (w *World) placeTree(x, y, z int, set func(x, y, z int, b Block)) {
+	th := 4 + rand.Intn(3)
+	for yy := y; yy < y+th; yy++ {
+		set(x, yy, z, Log)
+	}
+	top := y + th - 1
+	for dy := -2; dy <= 1; dy++ {
+		r := 2
+		if dy == 1 {
+			r = 1
+		}
+		for dz := -r; dz <= r; dz++ {
+			for dx := -r; dx <= r; dx++ {
+				if abs(dx) == 2 && abs(dz) == 2 && (dy == -2 || rand.Intn(2) == 0) {
+					continue
+				}
+				if b := w.getLocal(x+dx, top+dy, z+dz); b == Air || b == Sapling || b == TallGrass {
+					set(x+dx, top+dy, z+dz, Leaves)
+				}
+			}
+		}
+	}
+}
+
+// placeBirch writes a birch: a taller pale trunk with an oak-style canopy.
+func (w *World) placeBirch(x, y, z int, set func(x, y, z int, b Block)) {
+	th := 5 + rand.Intn(3)
+	for yy := y; yy < y+th; yy++ {
+		set(x, yy, z, BirchLog)
+	}
+	top := y + th - 1
+	for dy := -2; dy <= 1; dy++ {
+		r := 2
+		if dy == 1 {
+			r = 1
+		}
+		for dz := -r; dz <= r; dz++ {
+			for dx := -r; dx <= r; dx++ {
+				if abs(dx) == 2 && abs(dz) == 2 {
+					continue
+				}
+				if b := w.getLocal(x+dx, top+dy, z+dz); b == Air || b == TallGrass {
+					set(x+dx, top+dy, z+dz, Leaves)
+				}
+			}
+		}
+	}
+}
+
+// placeSpruce writes a tall conical spruce.
+func (w *World) placeSpruce(x, y, z int, set func(x, y, z int, b Block)) {
+	th := 7 + rand.Intn(3)
+	for yy := y; yy < y+th; yy++ {
+		set(x, yy, z, Log)
+	}
+	for dy := 2; dy <= th; dy++ {
+		r := 0
+		switch {
+		case dy == th:
+			r = 0
+		case dy >= th-2:
+			r = 1
+		case dy%2 == 0:
+			r = 2
+		default:
+			r = 1
+		}
+		for dz := -r; dz <= r; dz++ {
+			for dx := -r; dx <= r; dx++ {
+				if abs(dx) == r && abs(dz) == r && r == 2 {
+					continue
+				}
+				if b := w.getLocal(x+dx, y+dy, z+dz); b == Air {
+					set(x+dx, y+dy, z+dz, SpruceLeaves)
+				}
+			}
+		}
+	}
+	set(x, y+th, z, SpruceLeaves)
+}
+
+// GrowTree turns a sapling at world (x, y, z) into a tree if there is room.
+func (w *World) GrowTree(x, y, z int) bool {
+	lx, lz := x-originX, z-originZ
+	for yy := y; yy < y+6; yy++ {
+		if b := w.getLocal(lx, yy, lz); b != Air && b != Sapling && b != Leaves && b != TallGrass {
+			return false
+		}
+	}
+	w.placeTree(lx, y, lz, func(x, y, z int, b Block) { w.Set(x+originX, y, z+originZ, b) })
+	return true
 }
 
 func abs(a int) int {
@@ -247,17 +843,23 @@ func (w *World) setLocal(x, y, z int, b Block) {
 	}
 }
 
-func (w *World) surfaceLocal(x, z int) int {
+func (w *World) recomputeHeight(x, z int) {
+	top, ground := 0, 0
 	for y := worldH - 1; y >= 0; y-- {
-		if w.getLocal(x, y, z) != Air {
-			return y + 1
+		b := w.getLocal(x, y, z)
+		if b == Air {
+			continue
+		}
+		if top == 0 {
+			top = y + 1
+		}
+		if blocks[b].Solid {
+			ground = y + 1
+			break
 		}
 	}
-	return 0
-}
-
-func (w *World) recomputeHeight(x, z int) {
-	w.Height[z*worldW+x] = w.surfaceLocal(x, z)
+	w.Height[z*worldW+x] = top
+	w.Ground[z*worldW+x] = ground
 }
 
 // Get returns the block at world coordinates (Air outside the volume).
@@ -278,10 +880,44 @@ func (w *World) Solid(x, y, z int) bool {
 	if lx < 0 || lz < 0 || lx >= worldW || lz >= worldD {
 		return true
 	}
-	return w.Blocks[(y*worldD+lz)*worldW+lx] != Air
+	return blocks[w.Blocks[(y*worldD+lz)*worldW+lx]].Solid
 }
 
-// Set changes a block, updates the column height and marks chunk meshes dirty.
+// IsWater reports whether a world cell holds water.
+func (w *World) IsWater(x, y, z int) bool { return w.Get(x, y, z) == Water }
+
+// WaterAt reports whether a world position is inside water.
+func (w *World) WaterAt(p rl.Vector3) bool { return w.IsWater(floorI(p.X), floorI(p.Y), floorI(p.Z)) }
+
+// LavaAt reports whether a world position is inside lava.
+func (w *World) LavaAt(p rl.Vector3) bool {
+	return w.Get(floorI(p.X), floorI(p.Y), floorI(p.Z)) == Lava
+}
+
+// LiquidAt reports whether a world position is inside water or lava.
+func (w *World) LiquidAt(p rl.Vector3) bool {
+	return w.Get(floorI(p.X), floorI(p.Y), floorI(p.Z)).Liquid()
+}
+
+// TouchesBlock reports whether a box (feet at pos) overlaps or presses against a block type.
+func (w *World) TouchesBlock(pos rl.Vector3, hw, h float32, b Block) bool {
+	const m = 0.02
+	for y := floorI(pos.Y); y <= floorI(pos.Y+h); y++ {
+		for z := floorI(pos.Z - hw - m); z <= floorI(pos.Z+hw+m); z++ {
+			for x := floorI(pos.X - hw - m); x <= floorI(pos.X+hw+m); x++ {
+				if w.Get(x, y, z) == b {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// BlockAt returns the block containing a world position.
+func (w *World) BlockAt(p rl.Vector3) Block { return w.Get(floorI(p.X), floorI(p.Y), floorI(p.Z)) }
+
+// Set changes a block, updates the column heights and marks chunk meshes dirty.
 func (w *World) Set(x, y, z int, b Block) {
 	lx, lz := x-originX, z-originZ
 	if !inLocal(lx, y, lz) {
@@ -291,33 +927,46 @@ func (w *World) Set(x, y, z int, b Block) {
 	w.recomputeHeight(lx, lz)
 	w.Version++
 	cx, cz := lx/chunkSize, lz/chunkSize
+	w.relight[cz*w.ncx+cx] = true
 	mark := func(i, j int) {
 		if i >= 0 && j >= 0 && i < w.ncx && j < w.ncz {
 			w.chunks[j*w.ncx+i].dirty = true
 		}
 	}
 	mark(cx, cz)
-	if lx%chunkSize == 0 {
+	// Ambient occlusion reaches one block into neighbouring chunks.
+	if lx%chunkSize <= 1 {
 		mark(cx-1, cz)
 	}
-	if lx%chunkSize == chunkSize-1 {
+	if lx%chunkSize >= chunkSize-2 {
 		mark(cx+1, cz)
 	}
-	if lz%chunkSize == 0 {
+	if lz%chunkSize <= 1 {
 		mark(cx, cz-1)
 	}
-	if lz%chunkSize == chunkSize-1 {
+	if lz%chunkSize >= chunkSize-2 {
 		mark(cx, cz+1)
 	}
 }
 
-// SurfaceY returns the feet level of the surface at a world column.
+// SurfaceY returns the feet level of the highest solid block in a world column.
 func (w *World) SurfaceY(x, z int) int {
 	lx, lz := x-originX, z-originZ
 	if lx < 0 || lz < 0 || lx >= worldW || lz >= worldD {
 		return 0
 	}
-	return w.Height[lz*worldW+lx]
+	return w.Ground[lz*worldW+lx]
+}
+
+// SkyExposed reports whether nothing opaque sits above the given world position.
+func (w *World) SkyExposed(p rl.Vector3) bool {
+	x, z := floorI(p.X), floorI(p.Z)
+	for y := floorI(p.Y) + 1; y < worldH; y++ {
+		if w.Get(x, y, z).Opaque() {
+			return false
+		}
+	}
+	return true
 }
 
 func floorI(v float32) int { return int(math.Floor(float64(v))) }
@@ -330,22 +979,102 @@ func (w *World) SpawnPoint() rl.Vector3 {
 // ---------- rendering ----------
 
 type faceDef struct {
-	dx, dy, dz int
-	corners    [4][3]float32
-	shade      float32
+	n, u, v [3]int // outward normal and the two tangent axes (u x v = n)
+	shade   float32
 }
 
 var faces = [6]faceDef{
-	{0, 1, 0, [4][3]float32{{0, 1, 0}, {0, 1, 1}, {1, 1, 1}, {1, 1, 0}}, 1.0},
-	{0, -1, 0, [4][3]float32{{0, 0, 0}, {1, 0, 0}, {1, 0, 1}, {0, 0, 1}}, 0.45},
-	{1, 0, 0, [4][3]float32{{1, 0, 0}, {1, 1, 0}, {1, 1, 1}, {1, 0, 1}}, 0.82},
-	{-1, 0, 0, [4][3]float32{{0, 0, 0}, {0, 0, 1}, {0, 1, 1}, {0, 1, 0}}, 0.76},
-	{0, 0, 1, [4][3]float32{{0, 0, 1}, {1, 0, 1}, {1, 1, 1}, {0, 1, 1}}, 0.68},
-	{0, 0, -1, [4][3]float32{{0, 0, 0}, {0, 1, 0}, {1, 1, 0}, {1, 0, 0}}, 0.62},
+	{[3]int{0, 1, 0}, [3]int{1, 0, 0}, [3]int{0, 0, -1}, 1.0},
+	{[3]int{0, -1, 0}, [3]int{1, 0, 0}, [3]int{0, 0, 1}, 0.5},
+	{[3]int{1, 0, 0}, [3]int{0, 0, -1}, [3]int{0, 1, 0}, 0.8},
+	{[3]int{-1, 0, 0}, [3]int{0, 0, 1}, [3]int{0, 1, 0}, 0.8},
+	{[3]int{0, 0, 1}, [3]int{1, 0, 0}, [3]int{0, 1, 0}, 0.66},
+	{[3]int{0, 0, -1}, [3]int{-1, 0, 0}, [3]int{0, 1, 0}, 0.66},
+}
+
+var faceCorners = [4][2]int{{-1, -1}, {1, -1}, {1, 1}, {-1, 1}}
+
+// cornerLight is the smoothed light at a face corner: sunlight and block light in 0..1.
+type cornerLight struct{ sun, blk float32 }
+
+var fullLight = [4]cornerLight{{1, 1}, {1, 1}, {1, 1}, {1, 1}}
+var unitBox = [2][3]float32{{0, 0, 0}, {1, 1, 1}}
+
+// emitFace appends one textured block face to a mesh buffer. The vertex colour
+// encodes lighting for the terrain shader: R = sunlight, G = block light,
+// B = directional shade x ambient occlusion. box gives the face extents within the cell.
+func (m *meshBuf) emitFace(f *faceDef, b Block, x, y, z float32, box [2][3]float32, tint float32, ao [4]int, light [4]cornerLight) {
+	face := 1
+	if f.n[1] > 0 {
+		face = 0
+	} else if f.n[1] < 0 {
+		face = 2
+	}
+	u0, v0, u1, v1 := tileUV(b, face)
+	var pos [4][3]float32
+	var uv [4][2]float32
+	var shade [4]uint8
+	for k, c := range faceCorners {
+		su, sv := float32(c[0]), float32(c[1])
+		for a := 0; a < 3; a++ {
+			t := 0.5 + float32(f.n[a])*0.5 + su*float32(f.u[a])*0.5 + sv*float32(f.v[a])*0.5
+			pos[k][a] = lerp(box[0][a], box[1][a], t)
+		}
+		pos[k][0] += x
+		pos[k][1] += y
+		pos[k][2] += z
+		uv[k] = [2]float32{lerp(u0, u1, (su+1)/2), lerp(v0, v1, (1-sv)/2)}
+		bright := 0.55 + 0.45*float32(ao[k])/3
+		shade[k] = uint8(clamp(f.shade*tint*bright*255, 0, 255))
+	}
+	order := [6]int{0, 1, 2, 0, 2, 3}
+	if ao[0]+ao[2] < ao[1]+ao[3] {
+		order = [6]int{1, 2, 3, 1, 3, 0}
+	}
+	for _, i := range order {
+		m.verts = append(m.verts, pos[i][0], pos[i][1], pos[i][2])
+		m.norms = append(m.norms, float32(f.n[0]), float32(f.n[1]), float32(f.n[2]))
+		m.uvs = append(m.uvs, uv[i][0], uv[i][1])
+		m.cols = append(m.cols, uint8(light[i].sun*255), uint8(light[i].blk*255), shade[i], 255)
+	}
+}
+
+func (m *meshBuf) reset() {
+	m.verts, m.norms, m.uvs, m.cols = m.verts[:0], m.norms[:0], m.uvs[:0], m.cols[:0]
+}
+
+func (m *meshBuf) free() {
+	if m.loaded {
+		rl.UnloadMesh(&m.mesh)
+		m.loaded = false
+	}
+	m.mesh = rl.Mesh{}
+}
+
+func (m *meshBuf) upload() {
+	m.free()
+	if len(m.verts) == 0 {
+		return
+	}
+	m.mesh.VertexCount = int32(len(m.verts) / 3)
+	m.mesh.TriangleCount = m.mesh.VertexCount / 3
+	m.mesh.Vertices = &m.verts[0]
+	m.mesh.Normals = &m.norms[0]
+	m.mesh.Texcoords = &m.uvs[0]
+	m.mesh.Colors = &m.cols[0]
+	rl.UploadMesh(&m.mesh, false)
+	m.loaded = true
 }
 
 func (w *World) buildChunk(ci, cj int, c *chunk) {
-	c.verts, c.norms, c.cols = c.verts[:0], c.norms[:0], c.cols[:0]
+	c.opaque.reset()
+	c.trans.reset()
+	occ := func(x, y, z int) int {
+		if w.getLocal(x, y, z).Opaque() {
+			return 1
+		}
+		return 0
+	}
 	for lz := cj * chunkSize; lz < (cj+1)*chunkSize; lz++ {
 		for lx := ci * chunkSize; lx < (ci+1)*chunkSize; lx++ {
 			top := w.Height[lz*worldW+lx]
@@ -355,54 +1084,235 @@ func (w *World) buildChunk(ci, cj int, c *chunk) {
 					continue
 				}
 				info := &blocks[b]
-				// Subtle per-block tint variation gives a textured look.
-				v := 0.92 + hash2(lx, y*131+lz, 7)*0.12
-				for _, f := range faces {
-					if w.getLocal(lx+f.dx, y+f.dy, lz+f.dz) != Air {
+				trans := info.Trans
+				wx, wz := float32(lx+originX), float32(lz+originZ)
+				if info.Tiny {
+					// Small box lit by its own cell, no culling or occlusion.
+					l := cornerLight{float32(w.sunLocal(lx, y, lz)) / 15, float32(w.blockLocal(lx, y, lz)) / 15}
+					box := b.TinyBox()
+					for fi := range faces {
+						c.opaque.emitFace(&faces[fi], b, wx, float32(y), wz, box, 1, [4]int{3, 3, 3, 3}, [4]cornerLight{l, l, l, l})
+					}
+					continue
+				}
+				// Subtle per-block tint variation gives a weathered look.
+				tint := 0.93 + hash2(lx, y*131+lz, 7)*0.1
+				for fi := range faces {
+					f := &faces[fi]
+					nx, ny, nz := lx+f.n[0], y+f.n[1], lz+f.n[2]
+					nb := w.getLocal(nx, ny, nz)
+					if nb.Opaque() || (trans && nb == b) {
 						continue
 					}
-					base := info.Side
-					if f.dy > 0 {
-						base = info.Top
-					} else if f.dy < 0 {
-						base = info.Bottom
+					ao := [4]int{3, 3, 3, 3}
+					var light [4]cornerLight
+					for k, cn := range faceCorners {
+						cells := [4][3]int{
+							{nx, ny, nz},
+							{nx + cn[0]*f.u[0], ny + cn[0]*f.u[1], nz + cn[0]*f.u[2]},
+							{nx + cn[1]*f.v[0], ny + cn[1]*f.v[1], nz + cn[1]*f.v[2]},
+							{nx + cn[0]*f.u[0] + cn[1]*f.v[0], ny + cn[0]*f.u[1] + cn[1]*f.v[1], nz + cn[0]*f.u[2] + cn[1]*f.v[2]},
+						}
+						s1, s2, cr := occ(cells[1][0], cells[1][1], cells[1][2]), occ(cells[2][0], cells[2][1], cells[2][2]), occ(cells[3][0], cells[3][1], cells[3][2])
+						if !trans {
+							if s1 == 1 && s2 == 1 {
+								ao[k] = 0
+							} else {
+								ao[k] = 3 - s1 - s2 - cr
+							}
+						}
+						// Smooth lighting: average the open cells touching this corner.
+						var sun, blk, n float32
+						for _, cl := range cells {
+							if w.getLocal(cl[0], cl[1], cl[2]).Opaque() {
+								continue
+							}
+							sun += float32(w.sunLocal(cl[0], cl[1], cl[2]))
+							blk += float32(w.blockLocal(cl[0], cl[1], cl[2]))
+							n++
+						}
+						if n == 0 {
+							n = 1
+						}
+						light[k] = cornerLight{sun / n / 15, blk / n / 15}
 					}
-					s := f.shade * v
-					r, g, bl := uint8(float32(base.R)*s), uint8(float32(base.G)*s), uint8(float32(base.B)*s)
-					wx, wz := float32(lx+originX), float32(lz+originZ)
-					for _, i := range [6]int{0, 1, 2, 0, 2, 3} {
-						cr := f.corners[i]
-						c.verts = append(c.verts, wx+cr[0], float32(y)+cr[1], wz+cr[2])
-						c.norms = append(c.norms, float32(f.dx), float32(f.dy), float32(f.dz))
-						c.cols = append(c.cols, r, g, bl, 255)
+					dst := c.opaque
+					if trans {
+						dst = c.trans
 					}
+					dst.emitFace(f, b, wx, float32(y), wz, unitBox, tint, ao, light)
 				}
 			}
 		}
 	}
-	if c.loaded {
-		rl.UnloadMesh(&c.mesh)
-		c.loaded = false
-	}
-	c.mesh = rl.Mesh{}
-	if len(c.verts) == 0 {
-		return
-	}
-	c.mesh.VertexCount = int32(len(c.verts) / 3)
-	c.mesh.TriangleCount = c.mesh.VertexCount / 3
-	c.mesh.Vertices = &c.verts[0]
-	c.mesh.Normals = &c.norms[0]
-	c.mesh.Colors = &c.cols[0]
-	rl.UploadMesh(&c.mesh, false)
-	c.loaded = true
+	c.opaque.upload()
+	c.trans.upload()
 }
 
-// Draw renders all chunks, skipping ones fully behind the camera.
-func (w *World) Draw(cam rl.Camera3D) {
-	if !w.matOK {
-		w.mat = rl.LoadMaterialDefault()
-		w.matOK = true
+// BlockMesh returns a cached unit cube mesh (centred on the origin) for a block type.
+func (w *World) BlockMesh(b Block) *meshBuf {
+	if m, ok := w.blockM[b]; ok {
+		return m
 	}
+	m := &meshBuf{}
+	box := unitBox
+	if blocks[b].Tiny {
+		box = b.TinyBox()
+	}
+	for fi := range faces {
+		m.emitFace(&faces[fi], b, -0.5, -0.5, -0.5, box, 1, [4]int{3, 3, 3, 3}, fullLight)
+	}
+	m.upload()
+	w.blockM[b] = m
+	return m
+}
+
+const vertexShader = `#version 330
+in vec3 vertexPosition;
+in vec2 vertexTexCoord;
+in vec4 vertexColor;
+uniform mat4 mvp;
+out vec2 fragTexCoord;
+out vec4 fragColor;
+out vec3 fragPos;
+void main() {
+    fragTexCoord = vertexTexCoord;
+    fragColor = vertexColor;
+    fragPos = vertexPosition;
+    gl_Position = mvp * vec4(vertexPosition, 1.0);
+}`
+
+// Terrain: vertex colour R = sunlight, G = block light, B = shade; colDiffuse scales the same channels.
+const terrainFragment = `#version 330
+in vec2 fragTexCoord;
+in vec4 fragColor;
+in vec3 fragPos;
+uniform sampler2D texture0;
+uniform vec4 colDiffuse;
+uniform vec3 viewPos;
+uniform vec3 fogColor;
+uniform float fogStart;
+uniform float fogEnd;
+uniform float light;
+out vec4 finalColor;
+void main() {
+    vec4 t = texture(texture0, fragTexCoord);
+    float a = t.a * fragColor.a * colDiffuse.a;
+    if (a < 0.02) discard;
+    float sun = fragColor.r * colDiffuse.r * light;
+    float blk = fragColor.g * colDiffuse.g;
+    float l = max(sun, blk);
+    float bright = 0.03 + 0.97 * l * l;
+    vec3 rgb = t.rgb * fragColor.b * colDiffuse.b * bright;
+    float f = clamp((distance(viewPos, fragPos) - fogStart) / (fogEnd - fogStart), 0.0, 1.0);
+    finalColor = vec4(mix(rgb, fogColor, f), a);
+}`
+
+// Entities: plain textured colour with fog; brightness is applied by the caller.
+const entityFragment = `#version 330
+in vec2 fragTexCoord;
+in vec4 fragColor;
+in vec3 fragPos;
+uniform sampler2D texture0;
+uniform vec4 colDiffuse;
+uniform vec3 viewPos;
+uniform vec3 fogColor;
+uniform float fogStart;
+uniform float fogEnd;
+out vec4 finalColor;
+void main() {
+    vec4 c = texture(texture0, fragTexCoord) * fragColor * colDiffuse;
+    if (c.a < 0.02) discard;
+    float f = clamp((distance(viewPos, fragPos) - fogStart) / (fogEnd - fogStart), 0.0, 1.0);
+    finalColor = vec4(mix(c.rgb, fogColor, f), c.a);
+}`
+
+func (w *World) initGPU() {
+	w.gpu = true
+	img := rl.NewImageFromImage(buildAtlas())
+	w.tex = rl.LoadTextureFromImage(img)
+	rl.UnloadImage(img)
+	rl.SetTextureFilter(w.tex, rl.FilterPoint)
+	w.mat = rl.LoadMaterialDefault()
+	w.mat.GetMap(rl.MapDiffuse).Texture = w.tex
+	w.shader = rl.LoadShaderFromMemory(vertexShader, terrainFragment)
+	w.eshader = rl.LoadShaderFromMemory(vertexShader, entityFragment)
+	if rl.IsShaderValid(w.shader) && rl.IsShaderValid(w.eshader) {
+		w.shaderOK = true
+		w.mat.Shader = w.shader
+		w.locView = rl.GetShaderLocation(w.shader, "viewPos")
+		w.locFog = rl.GetShaderLocation(w.shader, "fogColor")
+		w.locFogS = rl.GetShaderLocation(w.shader, "fogStart")
+		w.locFogE = rl.GetShaderLocation(w.shader, "fogEnd")
+		w.locLight = rl.GetShaderLocation(w.shader, "light")
+		w.elocView = rl.GetShaderLocation(w.eshader, "viewPos")
+		w.elocFog = rl.GetShaderLocation(w.eshader, "fogColor")
+		w.elocFogS = rl.GetShaderLocation(w.eshader, "fogStart")
+		w.elocFogE = rl.GetShaderLocation(w.eshader, "fogEnd")
+	}
+}
+
+// Unload frees the GPU resources of a world that is being replaced.
+func (w *World) Unload() {
+	for _, c := range w.chunks {
+		c.opaque.free()
+		c.trans.free()
+	}
+	for _, m := range w.blockM {
+		m.free()
+	}
+	if w.gpu {
+		rl.UnloadTexture(w.tex)
+		if w.shaderOK {
+			rl.UnloadShader(w.shader)
+			rl.UnloadShader(w.eshader)
+		}
+		w.gpu = false
+	}
+}
+
+// Atlas returns the block texture atlas (for HUD icons).
+func (w *World) Atlas() rl.Texture2D {
+	if !w.gpu {
+		w.initGPU()
+	}
+	return w.tex
+}
+
+// SetEnv pushes camera, fog and daylight to the shader. Call once per frame before drawing.
+func (w *World) SetEnv(cam rl.Camera3D, env Env) {
+	if !w.gpu {
+		w.initGPU()
+	}
+	if !w.shaderOK {
+		return
+	}
+	rl.SetShaderValue(w.shader, w.locView, []float32{cam.Position.X, cam.Position.Y, cam.Position.Z}, rl.ShaderUniformVec3)
+	rl.SetShaderValue(w.shader, w.locFog, []float32{float32(env.Fog.R) / 255, float32(env.Fog.G) / 255, float32(env.Fog.B) / 255}, rl.ShaderUniformVec3)
+	rl.SetShaderValue(w.shader, w.locFogS, []float32{env.FogStart}, rl.ShaderUniformFloat)
+	rl.SetShaderValue(w.shader, w.locFogE, []float32{env.FogEnd}, rl.ShaderUniformFloat)
+	rl.SetShaderValue(w.shader, w.locLight, []float32{env.Light}, rl.ShaderUniformFloat)
+	rl.SetShaderValue(w.eshader, w.elocView, []float32{cam.Position.X, cam.Position.Y, cam.Position.Z}, rl.ShaderUniformVec3)
+	rl.SetShaderValue(w.eshader, w.elocFog, []float32{float32(env.Fog.R) / 255, float32(env.Fog.G) / 255, float32(env.Fog.B) / 255}, rl.ShaderUniformVec3)
+	rl.SetShaderValue(w.eshader, w.elocFogS, []float32{env.FogStart}, rl.ShaderUniformFloat)
+	rl.SetShaderValue(w.eshader, w.elocFogE, []float32{env.FogEnd}, rl.ShaderUniformFloat)
+}
+
+// BeginShader/EndShader route raylib's immediate-mode shapes through the lit, fogged world shader.
+func (w *World) BeginShader() {
+	if w.shaderOK {
+		rl.BeginShaderMode(w.eshader)
+	}
+}
+
+func (w *World) EndShader() {
+	if w.shaderOK {
+		rl.EndShaderMode()
+	}
+}
+
+func (w *World) visibleChunks(cam rl.Camera3D, fn func(c *chunk)) {
+	w.flushLight()
 	fwd := rl.Vector3Normalize(rl.Vector3Subtract(cam.Target, cam.Position))
 	for cj := 0; cj < w.ncz; cj++ {
 		for ci := 0; ci < w.ncx; ci++ {
@@ -411,16 +1321,46 @@ func (w *World) Draw(cam rl.Camera3D) {
 				w.buildChunk(ci, cj, c)
 				c.dirty = false
 			}
-			if !c.loaded {
-				continue
-			}
 			centre := rl.NewVector3(float32(ci*chunkSize+chunkSize/2+originX), worldH/2, float32(cj*chunkSize+chunkSize/2+originZ))
-			if rl.Vector3DotProduct(rl.Vector3Subtract(centre, cam.Position), fwd) < -24 {
+			if rl.Vector3DotProduct(rl.Vector3Subtract(centre, cam.Position), fwd) < -28 {
 				continue
 			}
-			rl.DrawMesh(c.mesh, w.mat, rl.MatrixIdentity())
+			fn(c)
 		}
 	}
+}
+
+// Draw renders the opaque geometry of all chunks not fully behind the camera.
+func (w *World) Draw(cam rl.Camera3D) {
+	if !w.gpu {
+		w.initGPU()
+	}
+	w.visibleChunks(cam, func(c *chunk) {
+		if c.opaque.loaded {
+			rl.DrawMesh(c.opaque.mesh, w.mat, rl.MatrixIdentity())
+		}
+	})
+}
+
+// DrawTranslucent renders water and glass; call after everything opaque.
+func (w *World) DrawTranslucent(cam rl.Camera3D) {
+	rl.DisableBackfaceCulling()
+	w.visibleChunks(cam, func(c *chunk) {
+		if c.trans.loaded {
+			rl.DrawMesh(c.trans.mesh, w.mat, rl.MatrixIdentity())
+		}
+	})
+	rl.EnableBackfaceCulling()
+}
+
+// DrawBlockAt draws a block-textured cube with the given transform (item drops),
+// lit by the cell it sits in.
+func (w *World) DrawBlockAt(b Block, transform rl.Matrix) {
+	lx, y, lz := floorI(transform.M12)-originX, floorI(transform.M13), floorI(transform.M14)-originZ
+	m := w.mat.GetMap(rl.MapDiffuse)
+	m.Color = rl.NewColor(uint8(w.sunLocal(lx, y, lz)*17), uint8(w.blockLocal(lx, y, lz)*17), 255, 255)
+	rl.DrawMesh(w.BlockMesh(b).mesh, w.mat, transform)
+	m.Color = rl.White
 }
 
 // ---------- collision ----------
@@ -441,6 +1381,11 @@ func (w *World) boxSolid(x0, y0, z0, x1, y1, z1 float32) bool {
 		}
 	}
 	return false
+}
+
+// HasGround reports whether a box with feet at pos rests on something solid.
+func (w *World) HasGround(pos rl.Vector3, hw float32) bool {
+	return w.boxSolid(pos.X-hw, pos.Y-0.05, pos.Z-hw, pos.X+hw, pos.Y, pos.Z+hw)
 }
 
 // MoveBox moves an axis-aligned box (feet at pos, half width hw, height h) by
@@ -533,8 +1478,23 @@ type RayHit struct {
 	NX, NY, NZ int // face normal (points to the adjacent air cell)
 }
 
-// RayCast walks the voxel grid (Amanatides & Woo) up to maxD units.
+// RayCast walks the voxel grid (Amanatides & Woo) up to maxD units, stopping at solid blocks.
 func (w *World) RayCast(o, d rl.Vector3, maxD float32) RayHit {
+	return w.rayCast(o, d, maxD, w.Solid)
+}
+
+// RayCastAny is RayCast for aiming: it also stops at non-solid blocks such as torches.
+func (w *World) RayCastAny(o, d rl.Vector3, maxD float32) RayHit {
+	return w.rayCast(o, d, maxD, func(x, y, z int) bool {
+		if w.Solid(x, y, z) {
+			return true
+		}
+		b := w.Get(x, y, z)
+		return b != Air && b != Water
+	})
+}
+
+func (w *World) rayCast(o, d rl.Vector3, maxD float32, hit func(x, y, z int) bool) RayHit {
 	d = rl.Vector3Normalize(d)
 	x, y, z := floorI(o.X), floorI(o.Y), floorI(o.Z)
 	step := [3]int{sign(d.X), sign(d.Y), sign(d.Z)}
@@ -563,7 +1523,7 @@ func (w *World) RayCast(o, d rl.Vector3, maxD float32) RayHit {
 		if cell[1] < 0 || cell[1] >= worldH && step[1] >= 0 {
 			break
 		}
-		if w.Solid(cell[0], cell[1], cell[2]) {
+		if hit(cell[0], cell[1], cell[2]) {
 			return RayHit{true, t, cell[0], cell[1], cell[2], normal[0], normal[1], normal[2]}
 		}
 		axis := 0
@@ -600,11 +1560,14 @@ func (w *World) RayDistance(ray rl.Ray) float32 {
 	return float32(math.Inf(1))
 }
 
-// RandomFreePoint finds a surface spawn point at least minDist from `from`.
+// RandomFreePoint finds a dry surface spawn point at least minDist from `from`.
 func (w *World) RandomFreePoint(from rl.Vector3, minDist float32) rl.Vector3 {
-	for i := 0; i < 200; i++ {
+	for i := 0; i < 300; i++ {
 		lx, lz := rand.Intn(worldW-4)+2, rand.Intn(worldD-4)+2
-		h := w.Height[lz*worldW+lx]
+		h := w.Ground[lz*worldW+lx]
+		if h != w.Height[lz*worldW+lx] || h <= seaLevel {
+			continue // under water or under a canopy
+		}
 		p := rl.NewVector3(float32(lx+originX)+0.5, float32(h), float32(lz+originZ)+0.5)
 		if h+2 < worldH && w.getLocal(lx, h+1, lz) == Air && w.PointFree(p, 0.5) &&
 			rl.Vector3Distance(rl.NewVector3(p.X, 0, p.Z), rl.NewVector3(from.X, 0, from.Z)) >= minDist {
@@ -612,6 +1575,19 @@ func (w *World) RandomFreePoint(from rl.Vector3, minDist float32) rl.Vector3 {
 		}
 	}
 	return rl.NewVector3(0.5, float32(w.SurfaceY(0, 0)), float32(originZ+3)+0.5)
+}
+
+// RandomDarkPoint is RandomFreePoint restricted to spots without torchlight,
+// so a well-lit base keeps hostiles from rising inside it.
+func (w *World) RandomDarkPoint(from rl.Vector3, minDist float32) (rl.Vector3, bool) {
+	for i := 0; i < 40; i++ {
+		p := w.RandomFreePoint(from, minDist)
+		lx, lz := floorI(p.X)-originX, floorI(p.Z)-originZ
+		if w.blockLocal(lx, floorI(p.Y), lz) < 8 {
+			return p, true
+		}
+	}
+	return rl.Vector3{}, false
 }
 
 func clamp(v, lo, hi float32) float32 {

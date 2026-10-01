@@ -9,7 +9,7 @@ const (
 	navDropDown = 3 // blocks an enemy will willingly drop
 )
 
-// NavGrid is a flow field over the terrain surface: every walkable column
+// NavGrid is a flow field over the terrain surface (highest solid block per column): every walkable column
 // stores its walking distance to the player, so enemies route over hills and
 // around trees and ruins by stepping "downhill". It is rebuilt when the player
 // changes column or the world changes.
@@ -44,10 +44,10 @@ func (g *NavGrid) refresh(w *World) {
 	g.version = w.Version
 	for z := 0; z < g.N; z++ {
 		for x := 0; x < g.N; x++ {
-			h := w.Height[z*worldW+x]
+			h := w.Ground[z*worldW+x]
 			g.Height[z*g.N+x] = h
-			// Needs two blocks of headroom above the surface.
-			g.Walk[z*g.N+x] = h+1 < worldH && w.getLocal(x, h, z) == Air && w.getLocal(x, h+1, z) == Air
+			// Needs two blocks of headroom above the ground (water is wadeable).
+			g.Walk[z*g.N+x] = h+1 < worldH && !blocks[w.getLocal(x, h, z)].Solid && !blocks[w.getLocal(x, h+1, z)].Solid
 		}
 	}
 	g.valid = false

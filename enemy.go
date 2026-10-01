@@ -9,33 +9,45 @@ import (
 const (
 	enemyAttackCD = 1.0
 	enemyReachY   = 2.2 // max vertical gap for a melee hit
+	creeperFuse   = 1.5
 )
 
 type EnemyKind int
 
 const (
-	KindGrunt EnemyKind = iota
-	KindRunner
+	KindZombie EnemyKind = iota
+	KindSpider
+	KindCreeper
 	KindBrute
+	KindSkeleton
+	KindGiant
 )
 
 type kindSpec struct {
-	Name   string
-	HP     int
-	Speed  float32
-	Radius float32
-	Height float32
-	HeadR  float32
-	Damage int
-	Points int
-	Body   rl.Color
-	Head   rl.Color
+	Name     string
+	HP       int
+	Speed    float32
+	Radius   float32
+	Height   float32
+	HeadR    float32
+	Damage   int
+	Points   int
+	Body     rl.Color
+	Head     rl.Color
+	Eyes     rl.Color
+	Burns    bool // dies in sunlight
+	Explodes bool
+	Ranged   bool // keeps its distance and shoots arrows
+	Smashes  bool // breaks through blocks in its way
 }
 
 var kinds = [...]kindSpec{
-	KindGrunt:  {"Grunt", 3, 2.6, 0.35, 1.9, 0.33, 12, 100, rl.NewColor(170, 40, 40, 255), rl.NewColor(210, 60, 60, 255)},
-	KindRunner: {"Runner", 2, 4.8, 0.3, 1.5, 0.26, 8, 125, rl.NewColor(210, 120, 30, 255), rl.NewColor(245, 165, 60, 255)},
-	KindBrute:  {"Brute", 12, 1.7, 0.45, 2.6, 0.45, 30, 300, rl.NewColor(90, 40, 130, 255), rl.NewColor(150, 80, 190, 255)},
+	KindZombie:   {"Zombie", 4, 2.4, 0.35, 1.9, 0.33, 12, 100, rl.NewColor(40, 120, 170, 255), rl.NewColor(70, 150, 70, 255), rl.NewColor(20, 20, 20, 255), true, false, false, false},
+	KindSpider:   {"Spider", 3, 4.6, 0.6, 0.9, 0.3, 8, 125, rl.NewColor(45, 35, 40, 255), rl.NewColor(60, 45, 50, 255), rl.NewColor(230, 40, 40, 255), true, false, false, false},
+	KindCreeper:  {"Creeper", 4, 2.9, 0.3, 1.7, 0.3, 0, 200, rl.NewColor(70, 160, 60, 255), rl.NewColor(80, 175, 70, 255), rl.NewColor(10, 10, 10, 255), false, true, false, false},
+	KindBrute:    {"Zombie Brute", 14, 1.7, 0.45, 2.6, 0.45, 30, 300, rl.NewColor(90, 60, 130, 255), rl.NewColor(60, 130, 60, 255), rl.NewColor(230, 60, 60, 255), true, false, false, false},
+	KindSkeleton: {"Skeleton", 4, 2.6, 0.3, 1.9, 0.3, 0, 150, rl.NewColor(205, 205, 200, 255), rl.NewColor(215, 215, 210, 255), rl.NewColor(40, 40, 40, 255), true, false, true, false},
+	KindGiant:    {"Giant", 60, 1.3, 0.8, 4.2, 0.7, 40, 1500, rl.NewColor(60, 110, 60, 255), rl.NewColor(80, 150, 70, 255), rl.NewColor(255, 60, 60, 255), false, false, false, true},
 }
 
 type Enemy struct {
@@ -50,26 +62,37 @@ type Enemy struct {
 	AttackCD float32
 	HitFlash float32
 	Phase    float32
+	Fuse     float32 // creeper: seconds spent hissing
+	Exploded bool    // creeper: went off this frame (the game handles the blast)
+	Burning  bool    // standing in sunlight
+	BurnT    float32
+	Lum      float32 // brightness of the cell the enemy stands in (set by the game before drawing)
+	ShootCD  float32
+	Shoot    bool    // wants to fire an arrow this frame (the game spawns it)
+	VoiceCD  float32 // time until the next idle sound
+	Smash    bool    // blocked by terrain this frame (giants break through)
 	Alive    bool
 	DeathT   float32 // death animation timer
 }
 
-func NewEnemy(pos rl.Vector3, kind EnemyKind, wave int) *Enemy {
+func NewEnemy(pos rl.Vector3, kind EnemyKind, night int) *Enemy {
 	s := &kinds[kind]
-	hp := s.HP + wave/3
+	hp := s.HP + night/2
 	if kind == KindBrute {
-		hp = s.HP + wave
+		hp = s.HP + night*2
 	}
-	jitter := float32(math.Mod(float64(pos.X*7.3+pos.Z*3.1), 1.0)) * 0.6
-	speed := min(s.Speed+float32(wave)*0.18, s.Speed*1.7) + jitter
+	jitter := float32(math.Mod(float64(pos.X*7.3+pos.Z*3.1), 1.0)) * 0.5
+	speed := min(s.Speed+float32(night)*0.12, s.Speed*1.6) + jitter
 	return &Enemy{
-		Kind:  kind,
-		Spec:  s,
-		Pos:   pos,
-		HP:    hp,
-		MaxHP: hp,
-		Speed: speed,
-		Alive: true,
+		Kind:    kind,
+		Spec:    s,
+		Pos:     pos,
+		HP:      hp,
+		MaxHP:   hp,
+		Speed:   speed,
+		Alive:   true,
+		Lum:     1,
+		VoiceCD: 2 + float32(math.Mod(float64(pos.X+pos.Z), 5)),
 	}
 }
 
@@ -90,7 +113,7 @@ func (e *Enemy) AttackRange() float32 { return e.Spec.Radius + playerHalfW + 0.9
 
 // Update steers toward the player (directly when adjacent, otherwise along the
 // nav field), walks with gravity and one-block step-ups, and attacks when close.
-// Returns damage dealt this frame.
+// Returns melee damage dealt this frame.
 func (e *Enemy) Update(dt float32, w *World, nav *NavGrid, p *Player, others []*Enemy) int {
 	if !e.Alive {
 		e.DeathT += dt
@@ -103,12 +126,53 @@ func (e *Enemy) Update(dt float32, w *World, nav *NavGrid, p *Player, others []*
 	to := rl.Vector3Subtract(p.Pos, e.Pos)
 	to.Y = 0
 	dist := rl.Vector3Length(to)
+	dy := math.Abs(float64(p.Pos.Y - e.Pos.Y))
+
+	// Creepers stop and hiss when close, and calm down again if the player escapes.
+	hissing := false
+	if e.Spec.Explodes {
+		if dist < 2.6 && dy < 2.5 {
+			hissing = true
+			e.Fuse += dt
+			if e.Fuse >= creeperFuse {
+				e.Exploded = true
+				e.Alive = false
+				e.DeathT = 10
+				return 0
+			}
+		} else if dist > 4.5 {
+			e.Fuse = max(0, e.Fuse-dt*2)
+		}
+	}
+
+	// Archers hang back at range and shoot when they can see the player.
+	e.Shoot = false
+	e.ShootCD = max(0, e.ShootCD-dt)
+	if e.Spec.Ranged {
+		eye := rl.NewVector3(e.Pos.X, e.Pos.Y+e.HeadY(), e.Pos.Z)
+		target := p.Eye()
+		clear := !w.RayCast(eye, rl.Vector3Subtract(target, eye), rl.Vector3Distance(eye, target)).Hit
+		if clear && dist < 16 && e.ShootCD == 0 {
+			e.ShootCD = 2.2
+			e.Shoot = true
+		}
+	}
+
+	inWater := w.WaterAt(rl.NewVector3(e.Pos.X, e.Pos.Y+0.3, e.Pos.Z))
 	var delta rl.Vector3
-	if dist > e.AttackRange()*0.8 {
+	if !hissing && dist > e.AttackRange()*0.8 {
 		want := rl.Vector3Scale(to, 1/dist)
 		if dist > 2.5 {
 			if d, ok := nav.Dir(e.Pos); ok {
 				want = d
+			}
+		}
+		if e.Spec.Ranged {
+			switch {
+			case dist < 6:
+				want = rl.Vector3Scale(to, -1/dist) // back off
+			case dist < 11:
+				want = rl.NewVector3(-to.Z/dist, 0, to.X/dist) // strafe
 			}
 		}
 		// Smooth the heading so enemies flow around corners instead of jittering.
@@ -118,16 +182,28 @@ func (e *Enemy) Update(dt float32, w *World, nav *NavGrid, p *Player, others []*
 		} else {
 			e.Heading = want
 		}
-		delta.X = e.Heading.X * e.Speed * dt
-		delta.Z = e.Heading.Z * e.Speed * dt
+		speed := e.Speed
+		if inWater {
+			speed *= 0.5
+		}
+		delta.X = e.Heading.X * speed * dt
+		delta.Z = e.Heading.Z * speed * dt
 	}
-	e.VelY = max(e.VelY-gravity*dt, -30)
+	if inWater {
+		e.VelY = max(e.VelY-gravity*0.3*dt, -1.5)
+		if w.WaterAt(rl.NewVector3(e.Pos.X, e.Pos.Y+e.Spec.Height*0.8, e.Pos.Z)) {
+			e.VelY = min(e.VelY+14*dt, 2.5) // float back up to breathe
+		}
+	} else {
+		e.VelY = max(e.VelY-gravity*dt, -30)
+	}
 	delta.Y = e.VelY * dt
 	var res MoveResult
 	e.Pos, res = w.MoveBox(e.Pos, e.Spec.Radius, e.Spec.Height, delta, true)
 	if res.Ground || res.Ceiling {
 		e.VelY = 0
 	}
+	e.Smash = e.Spec.Smashes && res.Wall
 
 	// Separate from other enemies so they don't stack.
 	var push rl.Vector3
@@ -147,7 +223,7 @@ func (e *Enemy) Update(dt float32, w *World, nav *NavGrid, p *Player, others []*
 		e.Pos, _ = w.MoveBox(e.Pos, e.Spec.Radius, e.Spec.Height, push, false)
 	}
 
-	if dist <= e.AttackRange() && e.AttackCD == 0 && math.Abs(float64(p.Pos.Y-e.Pos.Y)) < enemyReachY {
+	if e.Spec.Damage > 0 && dist <= e.AttackRange() && e.AttackCD == 0 && dy < enemyReachY {
 		e.AttackCD = enemyAttackCD
 		return e.Spec.Damage
 	}
@@ -168,6 +244,19 @@ func (e *Enemy) Hit(dmg int) bool {
 	return false
 }
 
+func (e *Enemy) tint(c rl.Color) rl.Color {
+	c = mul(c, e.Lum)
+	if e.HitFlash > 0 {
+		f := uint8(e.HitFlash * 255)
+		return rl.NewColor(max(c.R, f), max(c.G, f), max(c.B, f), 255)
+	}
+	if e.Fuse > 0 {
+		f := float32(math.Sin(float64(e.Fuse*22)))*0.5 + 0.5
+		return mix(c, rl.White, f*0.85)
+	}
+	return c
+}
+
 func (e *Enemy) Draw() {
 	s := e.Spec
 	if !e.Alive {
@@ -176,44 +265,130 @@ func (e *Enemy) Draw() {
 		if t <= 0 {
 			return
 		}
-		c := rl.NewColor(s.Body.R/2, s.Body.G/2, s.Body.B/2, uint8(200*t))
+		c := mul(rl.NewColor(s.Body.R/2, s.Body.G/2, s.Body.B/2, uint8(200*t)), e.Lum)
 		w := s.Radius * 2.6
 		rl.DrawCubeV(rl.NewVector3(e.Pos.X, e.Pos.Y+0.5*t, e.Pos.Z), rl.NewVector3(w, 1.0*t+0.05, w), c)
 		return
 	}
-	body, head := s.Body, s.Head
-	if e.HitFlash > 0 {
-		f := uint8(e.HitFlash * 255)
-		body = rl.NewColor(max(body.R, f), max(body.G, f), max(body.B, f), 255)
-		head = body
-	}
-	kw := s.Radius / 0.35 // width scale relative to a grunt
-	kh := s.Height / 1.9  // height scale relative to a grunt
+	body, head := e.tint(s.Body), e.tint(s.Head)
+	dark := e.tint(rl.NewColor(s.Body.R/3, s.Body.G/3, s.Body.B/3, 255))
+	outline := rl.NewColor(20, 20, 20, 255)
+	x, z := e.Pos.X, e.Pos.Z
 	bob := float32(math.Abs(math.Sin(float64(e.Phase)))) * 0.08
 	y := e.Pos.Y + bob
-	dark := rl.NewColor(s.Body.R/3, s.Body.G/3, s.Body.B/3, 255)
-	// Blocky legs, torso and head in the spirit of the world.
-	rl.DrawCubeV(rl.NewVector3(e.Pos.X-0.17*kw, y+0.35*kh, e.Pos.Z), rl.NewVector3(0.26*kw, 0.7*kh, 0.26*kw), dark)
-	rl.DrawCubeV(rl.NewVector3(e.Pos.X+0.17*kw, y+0.35*kh, e.Pos.Z), rl.NewVector3(0.26*kw, 0.7*kh, 0.26*kw), dark)
-	torso := rl.NewVector3(e.Pos.X, y+1.0*kh, e.Pos.Z)
-	tsz := rl.NewVector3(0.7*kw, 0.7*kh, 0.4*kw)
-	rl.DrawCubeV(torso, tsz, body)
-	rl.DrawCubeWiresV(torso, tsz, rl.NewColor(30, 0, 0, 255))
-	hs := s.HeadR * 1.8
-	rl.DrawCubeV(rl.NewVector3(e.Pos.X, y+e.HeadY(), e.Pos.Z), rl.NewVector3(hs, hs, hs), head)
-	rl.DrawCubeWiresV(rl.NewVector3(e.Pos.X, y+e.HeadY(), e.Pos.Z), rl.NewVector3(hs, hs, hs), rl.NewColor(30, 0, 0, 255))
-	// Eyes.
-	f := rl.Vector3Scale(e.Heading, hs/2+0.01)
-	side := rl.NewVector3(-e.Heading.Z, 0, e.Heading.X)
-	for _, sgn := range []float32{-1, 1} {
-		ep := rl.Vector3Add(rl.NewVector3(e.Pos.X, y+e.HeadY()+hs*0.1, e.Pos.Z), rl.Vector3Add(f, rl.Vector3Scale(side, sgn*hs*0.22)))
-		rl.DrawCubeV(ep, rl.NewVector3(hs*0.18, hs*0.18, hs*0.18), rl.NewColor(255, 230, 90, 255))
+	fwd := e.Heading
+	if rl.Vector3Length(fwd) < 0.01 {
+		fwd = rl.NewVector3(0, 0, 1)
+	}
+	side := rl.NewVector3(-fwd.Z, 0, fwd.X)
+
+	switch e.Kind {
+	case KindSpider:
+		// Low, wide body with eight stubby legs.
+		rl.DrawCubeV(rl.NewVector3(x, y+0.5, z), rl.NewVector3(0.9, 0.5, 1.1), body)
+		rl.DrawCubeWiresV(rl.NewVector3(x, y+0.5, z), rl.NewVector3(0.9, 0.5, 1.1), outline)
+		hp := rl.Vector3Add(rl.NewVector3(x, y+0.55, z), rl.Vector3Scale(fwd, 0.65))
+		rl.DrawCubeV(hp, rl.NewVector3(0.5, 0.45, 0.4), head)
+		for i := 0; i < 4; i++ {
+			off := float32(i)*0.28 - 0.42
+			lift := float32(math.Sin(float64(e.Phase+float32(i)*1.7))) * 0.1
+			for _, sg := range []float32{-1, 1} {
+				lp := rl.Vector3Add(rl.NewVector3(x, y+0.35+lift*sg, z), rl.Vector3Add(rl.Vector3Scale(side, sg*0.75), rl.Vector3Scale(fwd, off)))
+				rl.DrawCubeV(lp, rl.NewVector3(0.5, 0.12, 0.12), dark)
+			}
+		}
+	case KindCreeper:
+		// Tall thin body on four short legs, no arms.
+		for _, d := range [][2]float32{{-1, -1}, {1, -1}, {-1, 1}, {1, 1}} {
+			step := float32(math.Sin(float64(e.Phase)))*0.08*d[0]*d[1] + 0.2
+			lp := rl.Vector3Add(rl.NewVector3(x, y+step, z), rl.Vector3Add(rl.Vector3Scale(side, d[0]*0.16), rl.Vector3Scale(fwd, d[1]*0.16)))
+			rl.DrawCubeV(lp, rl.NewVector3(0.24, 0.4, 0.24), dark)
+		}
+		rl.DrawCubeV(rl.NewVector3(x, y+0.95, z), rl.NewVector3(0.5, 1.1, 0.5), body)
+		rl.DrawCubeWiresV(rl.NewVector3(x, y+0.95, z), rl.NewVector3(0.5, 1.1, 0.5), outline)
+		hs := s.HeadR * 1.8
+		rl.DrawCubeV(rl.NewVector3(x, y+e.HeadY(), z), rl.NewVector3(hs, hs, hs), head)
+		rl.DrawCubeWiresV(rl.NewVector3(x, y+e.HeadY(), z), rl.NewVector3(hs, hs, hs), outline)
+		// Frowning mouth.
+		mp := rl.Vector3Add(rl.NewVector3(x, y+e.HeadY()-hs*0.2, z), rl.Vector3Scale(fwd, hs/2+0.01))
+		rl.DrawCubeV(mp, rl.NewVector3(hs*0.3, hs*0.25, 0.02), rl.NewColor(10, 10, 10, 255))
+	default:
+		kw := s.Radius / 0.35 // width scale relative to a zombie
+		kh := s.Height / 1.9  // height scale relative to a zombie
+		legs := rl.NewColor(50, 50, 130, 255)
+		if e.Kind == KindBrute {
+			legs = dark
+		} else if e.Kind == KindSkeleton {
+			legs = s.Body
+		}
+		legs = e.tint(legs)
+		swing := float32(math.Sin(float64(e.Phase))) * 0.15
+		for _, sg := range []float32{-1, 1} {
+			lp := rl.Vector3Add(rl.NewVector3(x, y+0.35*kh, z), rl.Vector3Add(rl.Vector3Scale(side, sg*0.17*kw), rl.Vector3Scale(fwd, swing*sg)))
+			rl.DrawCubeV(lp, rl.NewVector3(0.26*kw, 0.7*kh, 0.26*kw), legs)
+		}
+		torso := rl.NewVector3(x, y+1.0*kh, z)
+		tsz := rl.NewVector3(0.7*kw, 0.7*kh, 0.4*kw)
+		rl.DrawCubeV(torso, tsz, body)
+		rl.DrawCubeWiresV(torso, tsz, outline)
+		if e.Kind == KindSkeleton {
+			// Bow held out to one side.
+			ap := rl.Vector3Add(rl.NewVector3(x, y+1.15*kh, z), rl.Vector3Add(rl.Vector3Scale(side, 0.4*kw), rl.Vector3Scale(fwd, 0.4*kw)))
+			rl.DrawCubeV(ap, rl.NewVector3(0.16, 0.2, 0.6), head)
+			bp := rl.Vector3Add(ap, rl.Vector3Scale(fwd, 0.35))
+			rl.DrawCubeV(bp, rl.NewVector3(0.08, 1.0, 0.08), e.tint(rl.NewColor(120, 85, 45, 255)))
+		} else {
+			// Arms held out in front, zombie style.
+			for _, sg := range []float32{-1, 1} {
+				ap := rl.Vector3Add(rl.NewVector3(x, y+1.15*kh, z), rl.Vector3Add(rl.Vector3Scale(side, sg*0.45*kw), rl.Vector3Scale(fwd, 0.35*kw)))
+				rl.DrawCubeV(ap, rl.NewVector3(0.2*kw, 0.2*kh, 0.7*kw), head)
+			}
+		}
+		hs := s.HeadR * 1.8
+		rl.DrawCubeV(rl.NewVector3(x, y+e.HeadY(), z), rl.NewVector3(hs, hs, hs), head)
+		rl.DrawCubeWiresV(rl.NewVector3(x, y+e.HeadY(), z), rl.NewVector3(hs, hs, hs), outline)
+	}
+	if e.Burning {
+		// Flames licking up the body.
+		for i := 0; i < 4; i++ {
+			fl := float32(math.Sin(float64(e.Phase*3+float32(i)*2.1)))*0.15 + 0.2
+			fp := rl.NewVector3(x+float32(math.Sin(float64(e.Phase*2+float32(i))))*0.25, y+s.Height*0.4+fl+float32(i)*0.25, z+float32(math.Cos(float64(e.Phase*2+float32(i)*1.3)))*0.25)
+			rl.DrawCubeV(fp, rl.NewVector3(0.25, 0.35, 0.25), rl.NewColor(255, 140+uint8(i*20), 20, 200))
+		}
 	}
 	// Health bar once damaged.
 	if e.HP < e.MaxHP {
 		top := y + s.Height + 0.2
 		frac := float32(e.HP) / float32(e.MaxHP)
-		rl.DrawCubeV(rl.NewVector3(e.Pos.X, top, e.Pos.Z), rl.NewVector3(1.0, 0.08, 0.08), rl.NewColor(0, 0, 0, 180))
-		rl.DrawCubeV(rl.NewVector3(e.Pos.X-(1-frac)*0.5, top, e.Pos.Z), rl.NewVector3(frac, 0.1, 0.1), rl.Lime)
+		rl.DrawCubeV(rl.NewVector3(x, top, z), rl.NewVector3(1.0, 0.08, 0.08), rl.NewColor(0, 0, 0, 180))
+		rl.DrawCubeV(rl.NewVector3(x-(1-frac)*0.5, top, z), rl.NewVector3(frac, 0.1, 0.1), rl.Lime)
+	}
+}
+
+// DrawGlow draws the eyes at full brightness so hostiles can be spotted at night.
+func (e *Enemy) DrawGlow() {
+	if !e.Alive {
+		return
+	}
+	s := e.Spec
+	fwd := e.Heading
+	if rl.Vector3Length(fwd) < 0.01 {
+		fwd = rl.NewVector3(0, 0, 1)
+	}
+	side := rl.NewVector3(-fwd.Z, 0, fwd.X)
+	bob := float32(math.Abs(math.Sin(float64(e.Phase)))) * 0.08
+	y := e.Pos.Y + bob
+	if e.Kind == KindSpider {
+		hp := rl.Vector3Add(rl.NewVector3(e.Pos.X, y+0.6, e.Pos.Z), rl.Vector3Scale(fwd, 0.86))
+		for _, sg := range []float32{-1.5, -0.5, 0.5, 1.5} {
+			rl.DrawCubeV(rl.Vector3Add(hp, rl.Vector3Scale(side, sg*0.1)), rl.NewVector3(0.07, 0.07, 0.03), s.Eyes)
+		}
+		return
+	}
+	hs := s.HeadR * 1.8
+	f := rl.Vector3Scale(fwd, hs/2+0.01)
+	for _, sgn := range []float32{-1, 1} {
+		ep := rl.Vector3Add(rl.NewVector3(e.Pos.X, y+e.HeadY()+hs*0.1, e.Pos.Z), rl.Vector3Add(f, rl.Vector3Scale(side, sgn*hs*0.22)))
+		rl.DrawCubeV(ep, rl.NewVector3(hs*0.18, hs*0.18, 0.03), s.Eyes)
 	}
 }

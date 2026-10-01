@@ -1,0 +1,10 @@
+blockworld
+blockworld-macos
+blockworld-linux
+blockworld.exe
+arena-strike
+arena-strike-macos
+arena-strike-linux
+arena-strike.exe
+*.app
+shot_*.png

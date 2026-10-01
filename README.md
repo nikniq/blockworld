@@ -1,32 +1,79 @@
-# Arena Strike
+# Blockworld
 
-A wave-survival first-person shooter written in Go with [raylib](https://www.raylib.com/).
-It runs natively on macOS, Linux and Windows from the same source.
+A Minecraft-style survival game with a rifle, written in Go with [raylib](https://www.raylib.com/).
+It runs natively on macOS, Linux and Windows from the same source and ships without asset files:
+block textures and sound effects are generated at startup.
 
 ## Gameplay
 
-- A 64x64 block world is generated every run: rolling hills, sand lowlands, trees and brick ruins.
-- Survive endless waves of hostiles. Enemies walk the terrain, climb one block at a time and route around obstacles.
-- Three enemy types: **Grunts** (baseline), **Runners** (fast, frail, from wave 3) and **Brutes** (slow, tanky, 30 damage, from wave 5).
-- Two tools on the hotbar. The **rifle** is a hitscan weapon with 12-round magazines; headshots deal triple damage and 1.5x points.
-  The **builder** mines any block by holding left click and places blocks with right click, so you can dig in, wall off or build a tower.
-- Mined blocks go to your inventory. You start with 24 planks. Bedrock cannot be broken.
-- Green cubes restore health, yellow cubes give ammo. Beacons and the minimap mark them.
-- Score points for kills, headshots and cleared waves. Your best score is saved between runs.
-- Procedural sound effects: no asset files needed.
+- A 96x96x48 block world is generated every run: hills, a mountain band, beaches, a sea,
+  winding caves and ore veins (coal, iron, gold, diamond), plus stone-brick ruins for cover.
+- **Biomes**: plains with tall grass and flowers, oak and birch forests, deserts with cacti (they sting),
+  and snowy taiga with tall spruces.
+- **Day/night cycle** (six minutes). Mine, craft and build by day. At nightfall zombies, spiders,
+  creepers, skeleton archers and zombie brutes rise in the dark; more arrive through the night.
+  Hostiles only rise where there is no torchlight, so a well-lit base is a safe base. Undead burn at sunrise.
+  Each night survived is worth a bonus; nights get bigger.
+- **Dungeons**: cobblestone rooms deep underground hold a monster spawner that breeds zombies and
+  skeletons while you are near, and loot crates with ammo, ore, TNT or diamonds. Smash the spawner
+  for a diamond and 500 points.
+- **Giants** walk on every fifth night: huge, slow, 60 health, and they smash through anything but
+  bedrock to reach you. Worth 1500 points and three diamonds.
+- **Difficulty** (D on the pause screen): Peaceful has no hostiles and half damage from the world,
+  Hard brings half again as many hostiles doing half again as much damage.
+- **Creepers** hiss when they reach you and explode, hurting everything nearby and blasting a crater.
+- **Mining and building**: hold left click to break a block, right click to place the held block.
+  Broken blocks drop as items you walk over. Sand and gravel fall when unsupported.
+  Stone needs a pickaxe tier; iron ore needs stone, gold and diamond ore need iron.
+- **Crafting (E)**: logs to planks, torches, TNT, ladders, beds, cobblestone to stone bricks, sand to glass, ore to rifle ammo,
+  and stone/iron/diamond swords and pickaxes. Better pickaxes mine faster; better swords hit harder.
+- **Animals**: pigs, cows and sheep graze on the grass and flee when hurt. They drop raw meat;
+  hold it and right click to eat for 30 health.
+- **TNT**: craft it from sand and coal, place it, then shoot it or hit it with the sword. It falls,
+  flashes for a few seconds and blows a large crater. Nearby TNT chains.
+- **Lava** pools at the bottom of the deepest caves. It glows, burns anything that touches it and destroys
+  dropped items. Place blocks into it to cross.
+- **Beds**: craft one from planks and wool (sheep drop wool), place it and right click it at night to sleep
+  through to sunrise, unless hostiles are nearby.
+- **Saplings** drop from leaves. Plant one on grass or dirt in the open and it grows into a new oak.
+- **Ladders**: craft from planks and stack them up a wall; hold forward or jump to climb, sneak to hang.
+- **Death and respawn**: dying shows what got you. Respawn at the world spawn, or at the last bed you
+  used, with full health; your blocks and ammo drop where you fell, tools and armour are kept.
+- **Armour**: leather (cows drop leather), iron and diamond armour absorb 25, 45 and 65 percent of
+  melee, arrow and blast damage.
+- **Weather**: rain rolls in now and then, greying the sky, thickening the fog and dimming the light.
+- **Save and continue**: S on the pause screen saves; quitting to the menu or closing the window
+  saves too. C on the menu continues the saved world. N on the death screen starts a new world.
+- **Hotbar**: rifle, sword and pickaxe, followed by every block stack you own. Pick with 1-9 or the wheel.
+- The rifle is hitscan with 12-round magazines; headshots deal triple damage. Ammo comes from crafting and
+  from hostiles. Health regenerates slowly out of combat. Falls hurt; water breaks the fall and you can swim.
+- Sneak to move slowly without falling off edges. Sprint for speed.
+- **Lighting**: sunlight and block light propagate through the world, so caves and sealed rooms are
+  pitch black and nights are dim. Craft **torches** (coal ore + planks) and place them anywhere to light
+  your mine or base. Hostiles and dropped items are lit by the cell they stand in.
+- Textured blocks with ambient occlusion and smooth lighting, fog, drifting clouds, stars and a sun and moon.
+- Compass and coordinates under the minimap. F5 switches to a third-person view of your blocky self.
+- Score points for kills, headshots and nights survived. Your best score is saved between runs.
 
 | Input | Action |
 |---|---|
 | Mouse | Look |
 | W A S D | Move |
-| Left Shift | Sprint |
-| Space | Jump (just over one block) |
-| 1 / 2 | Rifle / builder |
-| Left click | Fire (rifle) or mine (builder, hold) |
-| Right click | Place block (builder) |
-| Mouse wheel / Tab | Cycle block to place |
+| Left Ctrl | Sprint |
+| Left Shift | Sneak |
+| Space | Jump / swim up |
+| 1-9, mouse wheel, Tab | Select hotbar item |
+| Left click | Shoot (rifle), swing (sword), mine (pickaxe or block, hold) |
+| Right click | Place held block |
+| E | Crafting |
 | R | Reload |
-| Esc | Pause / resume |
+| Esc | Pause / resume (settings live here: sensitivity, volume, invert Y, swap mouse buttons) |
+| F11 | Fullscreen |
+| F5 | Third-person view |
+| H | Controls help |
+| M | Full map |
+| S (paused) | Save world |
+| C (menu) | Continue saved world |
 | Q (paused or dead) | Back to menu |
 | Enter (menu or dead) | Start / restart |
 
@@ -34,14 +81,15 @@ It runs natively on macOS, Linux and Windows from the same source.
 
 - Go 1.22 or newer
 - A C compiler (raylib is compiled from source through cgo)
+- OpenGL 3.3 (the world shader falls back to unlit rendering without it)
 - Platform libraries listed below
 
 ### macOS
 
 ```sh
 xcode-select --install   # once, for clang
-go build -o arena-strike .
-./arena-strike
+go build -o blockworld .
+./blockworld
 ```
 
 ### Linux (Debian/Ubuntu)
@@ -49,8 +97,8 @@ go build -o arena-strike .
 ```sh
 sudo apt install build-essential libgl1-mesa-dev libx11-dev libxi-dev \
     libxcursor-dev libxrandr-dev libxinerama-dev libwayland-dev libxkbcommon-dev
-go build -o arena-strike .
-./arena-strike
+go build -o blockworld .
+./blockworld
 ```
 
 Fedora: `sudo dnf install gcc mesa-libGL-devel libX11-devel libXi-devel libXcursor-devel libXrandr-devel libXinerama-devel wayland-devel libxkbcommon-devel`
@@ -61,24 +109,35 @@ Install Go and a GCC toolchain such as [w64devkit](https://github.com/skeeto/w64
 or MSYS2 mingw-w64, make sure `gcc` is on `PATH`, then:
 
 ```powershell
-go build -ldflags="-H windowsgui" -o arena-strike.exe .
-.\arena-strike.exe
+go build -ldflags="-H windowsgui" -o blockworld.exe .
+.\blockworld.exe
 ```
 
 A `Makefile` with `run`, `build`, `build-macos`, `build-linux` and `build-windows` targets is included.
 Because raylib is built through cgo, each binary must be compiled on its own platform
 (or with a matching cross toolchain such as `x86_64-w64-mingw32-gcc` and `CGO_ENABLED=1 GOOS=windows CC=x86_64-w64-mingw32-gcc`).
 
+`go test ./...` covers generation, collision, pathfinding, meshing, tools and crafting without a window.
+Setting `BLOCKWORLD_SHOTS=1` runs a short scripted session that writes sky, day, night, crafting and cave screenshots
+to the working directory and exits. `BLOCKWORLD_SOAK=1` runs a 4000-frame stress session (rapid mining, building,
+day/night cycling, hostiles, explosions, TNT, animals, crafting, save/load) and exits; it is meant to shake out crashes.
+
 ## Code layout
 
 | File | Contents |
 |---|---|
-| `main.go` | Game loop, states (menu/playing/paused/dead), waves, pickups, shooting, mining and placing, effects, HUD, hotbar, minimap |
-| `player.go` | Movement on voxels, mouse look, jumping, head bob, tools, inventory, weapon timers, camera |
-| `enemy.go` | Enemy types, AI (nav-field steering with step-ups, separation, melee), damage, drawing |
-| `world.go` | Voxel volume, terrain generation, chunk meshing, box-vs-block collision, DDA raycast, spawn points |
-| `nav.go` | Flow-field pathfinding over the terrain surface (breadth-first from the player's column, 1-block climbs) |
+| `main.go` | Game loop, states (menu/playing/paused/crafting/dead), day-night events, shooting, sword, explosions, mining and placing, falling sand, HUD, hotbar, minimap |
+| `player.go` | Movement on voxels, swimming, sneaking, fall damage, regeneration, mouse look, hotbar model, tool tiers |
+| `enemy.go` | Zombie, spider, creeper and brute AI (nav-field steering, step-ups, wading, fuses), damage, drawing |
+| `drops.go` | Item drops: physics, pickup, textured cube rendering |
+| `craft.go` | Recipes and the crafting screen |
+| `animals.go` | Pigs, cows and sheep: wandering, fleeing, meat drops |
+| `save.go` | Saving and loading a run (gzip + gob in the user config directory) |
+| `settings.go` | Mouse sensitivity, volume, invert Y and fullscreen preferences |
+| `arrows.go` | Skeleton arrows |
+| `sky.go` | Day/night cycle, sky and fog colours, sun, moon, stars and clouds |
+| `world.go` | Voxel volume, terrain/cave/ore generation, sunlight and torch light propagation, chunk meshing with ambient occlusion and smooth lighting, terrain and entity shaders (fog, daylight), collision, DDA raycast, spawn points |
+| `textures.go` | Procedural 16x16 block texture atlas |
+| `nav.go` | Flow-field pathfinding over the ground (breadth-first from the player's column, 1-block climbs) |
 | `audio.go` | Procedurally synthesised sound effects |
 | `score.go` | High score persistence in the user config directory |
-# blockworld
-# blockworld

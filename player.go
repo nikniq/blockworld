@@ -10,8 +10,9 @@ const (
 	playerHalfW  = 0.3
 	playerHeight = 1.8
 	eyeHeight    = 1.62
-	walkSpeed    = 5.5
-	sprintSpeed  = 8.5
+	walkSpeed    = 5.0
+	sprintSpeed  = 7.8
+	sneakSpeed   = 2.0
 	jumpSpeed    = 6.9 // clears just over one block
 	gravity      = 19.0
 	mouseSens    = 0.0022
@@ -19,53 +20,93 @@ const (
 	fireInterval = 0.16
 	reloadTime   = 1.4
 	maxHealth    = 100
-	startReserve = 48
-	reachDist    = 6.0 // how far blocks can be mined or placed
+	startReserve = 36
+	reachDist    = 5.5 // how far blocks can be mined or placed
+	swordCD      = 0.45
+	swordReach   = 3.2
+	fallSafeV    = 11.5 // landing faster than this hurts (about four blocks)
+	hotbarSlots  = 9
 )
 
-type Tool int
+type ItemKind int
 
 const (
-	ToolRifle Tool = iota
-	ToolBuilder
+	ItemRifle ItemKind = iota
+	ItemSword
+	ItemPickaxe
+	ItemBlock
+	ItemFood
 )
 
+// Item is one hotbar entry: a tool, or a stack of blocks from the inventory.
+type Item struct {
+	Kind  ItemKind
+	Block Block
+}
+
+var swordDamage = [...]int{1, 2, 3, 4, 6}           // by tier
+var armorReduce = [...]float32{0, 0.25, 0.45, 0.65} // damage absorbed by armour tier
+var armorNames = [...]string{"", "Leather", "Iron", "Diamond"}
+var pickSpeed = [...]float32{1, 2, 3.5, 5, 8} // mining speed multiplier for hard blocks, by tier
+
 type Player struct {
-	Pos      rl.Vector3 // feet position
-	VelY     float32
-	Yaw      float32
-	Pitch    float32
-	OnGround bool
+	Pos       rl.Vector3 // feet position
+	VelY      float32
+	Yaw       float32
+	Pitch     float32
+	OnGround  bool
+	InWater   bool // feet in water or lava
+	InLava    bool
+	OnLadder  bool
+	HeadWater bool // eyes in water
+	LavaT     float32
+	CactusT   float32
+	StepDist  float32 // distance walked since the last footstep
+	Stepped   bool    // a footstep landed this frame (the game plays the sound)
+	Sneak     bool
+	Sprinting bool
+	EyeOff    float32 // eye height offset while sneaking (smoothed)
 
 	HP        int
 	Ammo      int
 	Reserve   int
 	Reloading float32 // seconds remaining, 0 if not reloading
 	FireCD    float32
+	AttackCD  float32
 	Recoil    float32
 	BobPhase  float32
 	BobAmount float32
 	DmgFlash  float32
+	SinceHurt float32
+	RegenT    float32
+	FallDmg   int // fall damage taken this frame (consumed by the game)
 
-	Tool   Tool
-	Inv    [numBlocks]int
-	Place  Block   // block type that right click places
-	Aim    RayHit  // block under the crosshair (builder tool)
-	Mining bool    // currently breaking Aim
-	MineT  float32 // progress in seconds on the current block
-	Swing  float32 // arm swing animation timer
+	Held      Item
+	HotScroll int // first hotbar entry shown
+	SwordTier int
+	PickTier  int
+	ArmorTier int
+	Cause     string // what last hurt the player, for the death screen
+	Inv       [numBlocks]int
+	Aim       RayHit  // block under the crosshair
+	Mining    bool    // currently breaking Aim
+	MineT     float32 // progress in seconds on the current block
+	Swing     float32 // arm swing animation timer
 }
 
 func NewPlayer(pos rl.Vector3) *Player {
 	p := &Player{
-		Pos:     pos,
-		Yaw:     float32(math.Pi),
-		HP:      maxHealth,
-		Ammo:    magSize,
-		Reserve: startReserve,
-		Place:   Planks,
+		Pos:       pos,
+		Yaw:       float32(math.Pi),
+		HP:        maxHealth,
+		Ammo:      magSize,
+		Reserve:   startReserve,
+		SwordTier: TierWood,
+		PickTier:  TierWood,
+		Held:      Item{Kind: ItemPickaxe},
 	}
-	p.Inv[Planks] = 24
+	p.Inv[Planks] = 16
+	p.Inv[Torch] = 4
 	return p
 }
 
@@ -88,7 +129,7 @@ func (p *Player) Right() rl.Vector3 {
 
 func (p *Player) Eye() rl.Vector3 {
 	bob := float32(math.Sin(float64(p.BobPhase))) * 0.05 * p.BobAmount
-	return rl.NewVector3(p.Pos.X, p.Pos.Y+eyeHeight+bob, p.Pos.Z)
+	return rl.NewVector3(p.Pos.X, p.Pos.Y+eyeHeight-p.EyeOff+bob, p.Pos.Z)
 }
 
 func (p *Player) Camera() rl.Camera3D {
@@ -100,11 +141,15 @@ func (p *Player) Camera() rl.Camera3D {
 		cp*float32(math.Sin(float64(p.Yaw))),
 		float32(math.Sin(float64(pitch))),
 		cp*float32(math.Cos(float64(p.Yaw))))
+	fov := float32(75)
+	if p.Sprinting {
+		fov = 80
+	}
 	return rl.Camera3D{
 		Position:   eye,
 		Target:     rl.Vector3Add(eye, fwd),
 		Up:         rl.NewVector3(0, 1, 0),
-		Fovy:       75,
+		Fovy:       fov,
 		Projection: rl.CameraPerspective,
 	}
 }
@@ -116,33 +161,120 @@ func (p *Player) Box() rl.BoundingBox {
 		rl.NewVector3(p.Pos.X+playerHalfW, p.Pos.Y+playerHeight, p.Pos.Z+playerHalfW))
 }
 
-func (p *Player) Update(dt float32, w *World) {
-	// Mouse look.
-	md := rl.GetMouseDelta()
-	p.Yaw -= md.X * mouseSens
-	p.Pitch -= md.Y * mouseSens
-	p.Pitch = clamp(p.Pitch, -1.5, 1.5)
-
-	// Tool selection.
-	if rl.IsKeyPressed(rl.KeyOne) {
-		p.Tool = ToolRifle
-	}
-	if rl.IsKeyPressed(rl.KeyTwo) {
-		p.Tool = ToolBuilder
-	}
-	if wheel := rl.GetMouseWheelMove(); wheel != 0 || rl.IsKeyPressed(rl.KeyTab) {
-		if p.Tool == ToolBuilder {
-			step := 1
-			if wheel < 0 {
-				step = -1
-			}
-			p.CyclePlace(step)
-		} else if wheel != 0 {
-			p.Tool = ToolBuilder
+// Hotbar lists the tools followed by every block stack the player owns.
+func (p *Player) Hotbar() []Item {
+	items := []Item{{Kind: ItemRifle}, {Kind: ItemSword}, {Kind: ItemPickaxe}}
+	for b := Block(1); b < numBlocks; b++ {
+		if p.Inv[b] > 0 && b.Placeable() {
+			items = append(items, Item{ItemBlock, b})
+		} else if p.Inv[b] > 0 && blocks[b].Food > 0 {
+			items = append(items, Item{ItemFood, b})
 		}
 	}
+	return items
+}
 
-	// Movement input.
+// SelIndex returns the index of the held item in the hotbar (-1 if it vanished).
+func (p *Player) SelIndex() int {
+	for i, it := range p.Hotbar() {
+		if it == p.Held {
+			return i
+		}
+	}
+	return -1
+}
+
+// EnsureHeld falls back to the pickaxe when the held block stack ran out and
+// keeps the visible hotbar window around the selection.
+func (p *Player) EnsureHeld() {
+	i := p.SelIndex()
+	if i < 0 {
+		p.Held = Item{Kind: ItemPickaxe}
+		i = 2
+	}
+	if i < p.HotScroll {
+		p.HotScroll = i
+	}
+	if i >= p.HotScroll+hotbarSlots {
+		p.HotScroll = i - hotbarSlots + 1
+	}
+	p.HotScroll = max(0, min(p.HotScroll, len(p.Hotbar())-hotbarSlots))
+}
+
+func (p *Player) selectIndex(i int) {
+	hb := p.Hotbar()
+	if len(hb) == 0 {
+		return
+	}
+	i = ((i % len(hb)) + len(hb)) % len(hb)
+	p.Held = hb[i]
+	p.EnsureHeld()
+}
+
+// CycleHotbar moves the selection by step (mouse wheel).
+func (p *Player) CycleHotbar(step int) { p.selectIndex(p.SelIndex() + step) }
+
+// HoldBlock selects a block stack if the player owns it.
+func (p *Player) HoldBlock(b Block) {
+	if p.Inv[b] > 0 && b.Placeable() {
+		p.Held = Item{ItemBlock, b}
+		p.EnsureHeld()
+	}
+}
+
+func (p *Player) SwordDamage() int { return swordDamage[p.SwordTier] }
+
+// MineTime returns how long the held tool needs to break a block (<0: cannot).
+func (p *Player) MineTime(b Block) float32 {
+	info := &blocks[b]
+	if info.MineTime < 0 {
+		return -1
+	}
+	if !info.Hard {
+		return info.MineTime
+	}
+	tier := TierHand
+	if p.Held.Kind == ItemPickaxe {
+		tier = p.PickTier
+	}
+	if tier < info.MinTier {
+		return -1
+	}
+	return info.MineTime / pickSpeed[tier]
+}
+
+func (p *Player) Update(dt float32, w *World) {
+	p.FallDmg = 0
+	// Mouse look.
+	md := rl.GetMouseDelta()
+	p.Yaw -= md.X * mouseSens * settings.Sensitivity
+	if settings.InvertY {
+		md.Y = -md.Y
+	}
+	p.Pitch -= md.Y * mouseSens * settings.Sensitivity
+	p.Pitch = clamp(p.Pitch, -1.55, 1.55)
+
+	// Hotbar selection.
+	for i, k := range []int32{rl.KeyOne, rl.KeyTwo, rl.KeyThree, rl.KeyFour, rl.KeyFive, rl.KeySix, rl.KeySeven, rl.KeyEight, rl.KeyNine} {
+		if rl.IsKeyPressed(k) {
+			if idx := p.HotScroll + i; idx < len(p.Hotbar()) {
+				p.selectIndex(idx)
+			}
+		}
+	}
+	if wheel := rl.GetMouseWheelMove(); wheel != 0 {
+		if wheel < 0 {
+			p.CycleHotbar(1)
+		} else {
+			p.CycleHotbar(-1)
+		}
+	}
+	if rl.IsKeyPressed(rl.KeyTab) {
+		p.CycleHotbar(1)
+	}
+	p.EnsureHeld()
+
+	// Movement input. Shift sneaks, Ctrl sprints (Minecraft bindings).
 	var move rl.Vector3
 	if rl.IsKeyDown(rl.KeyW) {
 		move = rl.Vector3Add(move, p.FlatForward())
@@ -156,41 +288,136 @@ func (p *Player) Update(dt float32, w *World) {
 	if rl.IsKeyDown(rl.KeyA) {
 		move = rl.Vector3Subtract(move, p.Right())
 	}
+	moving := rl.Vector3Length(move) > 0
+	p.Sneak = rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift)
+	p.Sprinting = !p.Sneak && moving && rl.IsKeyDown(rl.KeyW) && (rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl) || rl.IsKeyDown(rl.KeyLeftSuper))
 	speed := float32(walkSpeed)
-	if rl.IsKeyDown(rl.KeyLeftShift) {
+	if p.Sneak {
+		speed = sneakSpeed
+	} else if p.Sprinting {
 		speed = sprintSpeed
 	}
-	moving := rl.Vector3Length(move) > 0
+
+	feet := rl.NewVector3(p.Pos.X, p.Pos.Y+0.4, p.Pos.Z)
+	p.InWater = w.LiquidAt(feet)
+	p.InLava = w.LavaAt(feet) || w.LavaAt(p.Pos)
+	p.OnLadder = w.BlockAt(feet) == Ladder || w.BlockAt(rl.NewVector3(p.Pos.X, p.Pos.Y+1.2, p.Pos.Z)) == Ladder
+	atSurface := !p.InWater && w.LiquidAt(p.Pos) // bobbing at the water line
+	if p.InWater {
+		speed *= 0.55
+		p.Sprinting = false
+	}
 	var delta rl.Vector3
 	if moving {
 		m := rl.Vector3Scale(rl.Vector3Normalize(move), speed*dt)
 		delta.X, delta.Z = m.X, m.Z
 	}
-	if p.OnGround && rl.IsKeyPressed(rl.KeySpace) {
-		p.VelY = jumpSpeed
+
+	// Vertical: swim in water, otherwise jump and fall.
+	if p.OnLadder && !p.InWater {
+		// Climb with jump or forward, otherwise slide down slowly.
+		p.VelY = -1.2
+		if rl.IsKeyDown(rl.KeySpace) || rl.IsKeyDown(rl.KeyW) {
+			p.VelY = 3.2
+		}
+		if p.Sneak {
+			p.VelY = 0
+		}
+	} else if p.InWater {
+		p.VelY = max(p.VelY-gravity*0.3*dt, -2.5)
+		if rl.IsKeyDown(rl.KeySpace) {
+			p.VelY = min(p.VelY+28*dt, 4)
+		}
+	} else {
+		if (p.OnGround || atSurface) && rl.IsKeyPressed(rl.KeySpace) {
+			p.VelY = jumpSpeed
+		}
+		p.VelY = max(p.VelY-gravity*dt, -30)
 	}
-	p.VelY = max(p.VelY-gravity*dt, -30)
-	delta.Y = p.VelY * dt
+	impact := p.VelY
+	wasGround := p.OnGround
 	var res MoveResult
-	p.Pos, res = w.MoveBox(p.Pos, playerHalfW, playerHeight, delta, false)
+	if p.Sneak && p.OnGround && !p.InWater {
+		// Sneaking never walks off an edge: apply each axis only if ground remains.
+		for _, d := range [2]rl.Vector3{{X: delta.X}, {Z: delta.Z}} {
+			try, _ := w.MoveBox(p.Pos, playerHalfW, playerHeight, d, false)
+			if w.HasGround(try, playerHalfW) {
+				p.Pos = try
+			}
+		}
+		p.Pos, res = w.MoveBox(p.Pos, playerHalfW, playerHeight, rl.NewVector3(0, p.VelY*dt, 0), false)
+	} else {
+		delta.Y = p.VelY * dt
+		p.Pos, res = w.MoveBox(p.Pos, playerHalfW, playerHeight, delta, false)
+	}
 	if res.Ground || res.Ceiling {
 		p.VelY = 0
 	}
+	if (p.InWater || atSurface) && res.Wall && moving {
+		p.VelY = max(p.VelY, 5.5) // swimming against a bank climbs out of the water
+	}
 	p.OnGround = res.Ground
+	if p.OnGround && !wasGround && impact < -fallSafeV && !p.InWater && !p.OnLadder {
+		p.FallDmg = int((-impact - fallSafeV) * 3)
+		p.Hurt(p.FallDmg, "fell from a high place", false)
+	}
+	p.HeadWater = w.WaterAt(p.Eye())
+	// Lava burns.
+	if p.InLava {
+		p.LavaT += dt
+		if p.LavaT >= 0.4 {
+			p.LavaT = 0
+			p.Hurt(6, "tried to swim in lava", false)
+		}
+	} else {
+		p.LavaT = 0
+	}
 
-	// Head bob.
+	// Cactus spines.
+	if w.TouchesBlock(p.Pos, playerHalfW, playerHeight, Cactus) {
+		p.CactusT += dt
+		if p.CactusT >= 0.5 {
+			p.CactusT = 0
+			p.Hurt(2, "was pricked to death", false)
+		}
+	} else {
+		p.CactusT = 0.4
+	}
+
+	// Head bob, footsteps and sneak camera.
+	p.Stepped = false
 	if moving && p.OnGround {
 		p.BobPhase += dt * speed * 1.6
 		p.BobAmount = lerp(p.BobAmount, 1, dt*8)
+		p.StepDist += speed * dt
+		if p.StepDist >= 1.9 {
+			p.StepDist = 0
+			p.Stepped = !p.Sneak
+		}
 	} else {
 		p.BobAmount = lerp(p.BobAmount, 0, dt*8)
 	}
+	target := float32(0)
+	if p.Sneak {
+		target = 0.3
+	}
+	p.EyeOff = lerp(p.EyeOff, target, dt*12)
 
 	// Timers.
 	p.FireCD = max(0, p.FireCD-dt)
+	p.AttackCD = max(0, p.AttackCD-dt)
 	p.Recoil = lerp(p.Recoil, 0, dt*12)
 	p.DmgFlash = max(0, p.DmgFlash-dt*2)
 	p.Swing = max(0, p.Swing-dt*4)
+	p.SinceHurt += dt
+	// Slow natural regeneration once out of combat for a while.
+	if p.SinceHurt > 6 && p.HP < maxHealth {
+		p.RegenT += dt
+		if p.RegenT >= 2.5 {
+			p.RegenT = 0
+			p.HP++
+		}
+	}
 	if p.Reloading > 0 {
 		p.Reloading -= dt
 		if p.Reloading <= 0 {
@@ -201,34 +428,9 @@ func (p *Player) Update(dt float32, w *World) {
 			p.Reserve -= take
 		}
 	}
-	if rl.IsKeyPressed(rl.KeyR) && p.Tool == ToolRifle {
+	if rl.IsKeyPressed(rl.KeyR) && p.Held.Kind == ItemRifle {
 		p.StartReload()
 	}
-}
-
-// CyclePlace moves the placement selection to the next owned block type.
-func (p *Player) CyclePlace(step int) {
-	for i := 1; i < int(numBlocks); i++ {
-		b := Block((int(p.Place) + step*i + int(numBlocks)*i) % int(numBlocks))
-		if b != Air && p.Inv[b] > 0 {
-			p.Place = b
-			return
-		}
-	}
-}
-
-// EnsurePlace picks any owned block if the current selection ran out.
-func (p *Player) EnsurePlace() {
-	if p.Place != Air && p.Inv[p.Place] > 0 {
-		return
-	}
-	for b := Block(1); b < numBlocks; b++ {
-		if p.Inv[b] > 0 {
-			p.Place = b
-			return
-		}
-	}
-	p.Place = Air
 }
 
 func (p *Player) StartReload() {
@@ -237,13 +439,13 @@ func (p *Player) StartReload() {
 	}
 }
 
-// TryFire returns true if a shot was fired this frame.
+// TryFire returns true if a rifle shot was fired this frame.
 func (p *Player) TryFire() bool {
-	if p.Tool != ToolRifle || !rl.IsMouseButtonDown(rl.MouseButtonLeft) || p.FireCD > 0 || p.Reloading > 0 {
+	if p.Held.Kind != ItemRifle || !attackDown() || p.FireCD > 0 || p.Reloading > 0 {
 		return false
 	}
 	if p.Ammo == 0 {
-		if rl.IsMouseButtonPressed(rl.MouseButtonLeft) {
+		if attackPressed() {
 			p.StartReload()
 		}
 		return false
@@ -257,9 +459,35 @@ func (p *Player) TryFire() bool {
 	return true
 }
 
+// TryAttack returns true if a sword swing starts this frame.
+func (p *Player) TryAttack() bool {
+	if p.Held.Kind != ItemSword || !attackDown() || p.AttackCD > 0 {
+		return false
+	}
+	p.AttackCD = swordCD
+	p.Swing = 1
+	return true
+}
+
+// Hurt applies damage with a cause; armour absorbs part of it when armored is set.
+func (p *Player) Hurt(n int, cause string, armored bool) {
+	if n <= 0 {
+		return
+	}
+	if armored {
+		n = max(1, int(float32(n)*(1-armorReduce[p.ArmorTier])+0.5))
+	}
+	p.Cause = cause
+	p.Damage(n)
+}
+
 func (p *Player) Damage(n int) {
+	if n <= 0 {
+		return
+	}
 	p.HP -= n
 	p.DmgFlash = 1
+	p.SinceHurt = 0
 	if p.HP < 0 {
 		p.HP = 0
 	}
