@@ -1,12 +1,14 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"image"
 	"image/color"
 	"math"
 	"math/rand"
 	"os"
+	"time"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -63,9 +65,16 @@ type Game struct {
 	ShowMap     bool
 	RainCD      float32
 	SpawnerCD   float32
-	SleepT      float32 // fade while sleeping
-	Tracers     []Tracer
-	Sparks      []Spark
+
+	Net            *Net
+	netTestCell    [3]int
+	netTestWas     Block
+	Remotes        map[uint32]*RemotePlayer
+	RemoteHostiles int // hostile count reported by the host (client only)
+	nextID         uint32
+	SleepT         float32 // fade while sleeping
+	Tracers        []Tracer
+	Sparks         []Spark
 
 	Night      int // nights that have fallen so far
 	WasNight   bool
@@ -90,7 +99,7 @@ type Game struct {
 }
 
 func NewGame() *Game {
-	g := &Game{Audio: NewAudio(), HighScore: loadHighScore(), CraftHover: -1}
+	g := &Game{Audio: NewAudio(), HighScore: loadHighScore(), CraftHover: -1, Remotes: map[uint32]*RemotePlayer{}}
 	g.Reset()
 	g.State = StateMenu
 	return g
@@ -129,6 +138,34 @@ func (g *Game) Reset() {
 
 func (g *Game) say(s string, t float32) { g.Msg, g.MsgT = s, t }
 
+// announce shows a message locally and to every connected player.
+func (g *Game) announce(s string, t float32) {
+	g.say(s, t)
+	g.sendFx(Fx{Kind: FxMessage, Text: s})
+}
+
+// assignIDs gives every entity a stable id for multiplayer snapshots.
+func (g *Game) assignIDs() {
+	for _, e := range g.Enemies {
+		if e.ID == 0 {
+			g.nextID++
+			e.ID = g.nextID
+		}
+	}
+	for _, a := range g.Animals {
+		if a.ID == 0 {
+			g.nextID++
+			a.ID = g.nextID
+		}
+	}
+	for i := range g.Drops {
+		if g.Drops[i].ID == 0 {
+			g.nextID++
+			g.Drops[i].ID = g.nextID
+		}
+	}
+}
+
 // nightfall starts a night: a first rush of hostiles, the rest trickle in.
 func (g *Game) nightfall() {
 	g.Night++
@@ -138,18 +175,18 @@ func (g *Game) nightfall() {
 	g.SpawnLeft = total - first
 	g.SpawnCD = 6
 	if total == 0 {
-		g.say(fmt.Sprintf("NIGHT %d  -  peaceful", g.Night), 3)
+		g.announce(fmt.Sprintf("NIGHT %d  -  peaceful", g.Night), 3)
 		return
 	}
 	if g.Night%5 == 0 {
 		if q, ok := g.World.RandomDarkPoint(g.Player.Pos, 20); ok {
 			g.Enemies = append(g.Enemies, NewEnemy(q, KindGiant, g.Night))
-			g.say(fmt.Sprintf("NIGHT %d  -  the ground shakes. A GIANT walks.", g.Night), 4)
+			g.announce(fmt.Sprintf("NIGHT %d  -  the ground shakes. A GIANT walks.", g.Night), 4)
 			g.Audio.Play(g.Audio.Explode, 0.5)
 			return
 		}
 	}
-	g.say(fmt.Sprintf("NIGHT %d  -  the dead rise (%d hostiles)", g.Night, total), 3)
+	g.announce(fmt.Sprintf("NIGHT %d  -  the dead rise (%d hostiles)", g.Night, total), 3)
 	g.Audio.Play(g.Audio.Wave, 0.8)
 }
 
@@ -160,7 +197,13 @@ func (g *Game) dawn() {
 	bonus := 400 * g.Night
 	g.Score += bonus
 	g.SpawnLeft = 0
-	g.say(fmt.Sprintf("You survived night %d!  +%d", g.Night, bonus), 3.5)
+	g.announce(fmt.Sprintf("You survived night %d!  +%d", g.Night, bonus), 3.5)
+	if g.isHost() {
+		g.Net.broadcast(&Msg{Score: &struct {
+			Points int
+			Kill   bool
+		}{bonus, false}}, 0)
+	}
 	g.Audio.Play(g.Audio.Clear, 0.7)
 }
 
@@ -209,10 +252,15 @@ func (g *Game) aliveEnemies() int {
 	return n
 }
 
-// killEnemy scores a kill and rolls the loot drop.
+// killEnemy scores a kill for the local player and rolls the loot drop.
 func (g *Game) killEnemy(e *Enemy, pts int) {
 	g.Kills++
 	g.Score += pts
+	g.killEnemyRaw(e)
+}
+
+// killEnemyRaw handles the death itself: sound, loot and messages.
+func (g *Game) killEnemyRaw(e *Enemy) {
 	g.Audio.Play(g.Audio.Die, 0.7)
 	c := rl.NewVector3(e.Pos.X, e.Pos.Y+0.5, e.Pos.Z)
 	switch e.Kind {
@@ -238,7 +286,7 @@ func (g *Game) killEnemy(e *Enemy, pts int) {
 			g.spawnDrop(c, DiamondOre, 0)
 		}
 		g.spawnDrop(c, 0, 24)
-		g.say("GIANT SLAIN  +1500", 3)
+		g.announce("GIANT SLAIN  +1500", 3)
 	}
 }
 
@@ -292,6 +340,35 @@ func (g *Game) fire() {
 	g.Tracers = append(g.Tracers, Tracer{muzzle, end, 0.06})
 	g.Flash = 0.05
 	g.Audio.Play(g.Audio.Shoot, 0.9)
+	g.sendFx(Fx{Kind: FxShot, Pos: eye})
+
+	if g.isClient() {
+		// The host resolves damage; we only show feedback.
+		if target != nil || animal != nil {
+			g.HitMark = 0.15
+			g.Audio.Play(g.Audio.Hit, 0.6)
+			g.burst(end, rl.NewColor(255, 80, 80, 255), 10)
+			h := &struct {
+				Enemy    uint32
+				Animal   uint32
+				Dmg      int
+				Headshot bool
+				Knock    rl.Vector3
+			}{Dmg: headshotDamage(headshot), Headshot: headshot}
+			if target != nil {
+				h.Enemy = target.ID
+			} else {
+				h.Animal = animal.ID
+			}
+			g.sendToHost(&Msg{Hit: h})
+		} else if wall.Hit {
+			g.burst(end, rl.NewColor(220, 220, 200, 255), 6)
+			if g.World.Get(wall.X, wall.Y, wall.Z) == TNT {
+				g.sendToHost(&Msg{Prime: &struct{ X, Y, Z int }{wall.X, wall.Y, wall.Z}})
+			}
+		}
+		return
+	}
 
 	if target != nil {
 		dmg := 1
@@ -368,6 +445,30 @@ func (g *Game) attack() {
 			target = nil
 		}
 	}
+	if g.isClient() {
+		if target != nil || animal != nil {
+			g.HitMark = 0.15
+			g.Audio.Play(g.Audio.Hit, 0.7)
+			g.burst(rl.Vector3Add(eye, rl.Vector3Scale(ray.Direction, best)), rl.NewColor(255, 90, 90, 255), 8)
+			h := &struct {
+				Enemy    uint32
+				Animal   uint32
+				Dmg      int
+				Headshot bool
+				Knock    rl.Vector3
+			}{Dmg: p.SwordDamage()}
+			if target != nil {
+				h.Enemy = target.ID
+				h.Knock = rl.Vector3Scale(p.FlatForward(), 0.9)
+			} else {
+				h.Animal = animal.ID
+			}
+			g.sendToHost(&Msg{Hit: h})
+		} else if a := p.Aim; a.Hit && g.World.Get(a.X, a.Y, a.Z) == TNT {
+			g.sendToHost(&Msg{Prime: &struct{ X, Y, Z int }{a.X, a.Y, a.Z}})
+		}
+		return
+	}
 	if animal != nil {
 		g.HitMark = 0.15
 		g.Audio.Play(g.Audio.Hit, 0.5)
@@ -438,11 +539,11 @@ func (g *Game) updatePrimed(dt float32) {
 // blast damages the player, hostiles and animals within range, cratering the
 // terrain and lighting any TNT caught in it.
 func (g *Game) blast(pos rl.Vector3, r, dmg float32) {
-	p := g.Player
 	reach := r * 2.5
-	if d := rl.Vector3Distance(pos, rl.Vector3Add(p.Pos, rl.NewVector3(0, 0.9, 0))); d < reach {
-		p.Hurt(int(dmg*(1-d/reach)*damageScale()), "was blown up", true)
-		g.Audio.Play(g.Audio.Hurt, 0.9)
+	for _, t := range g.targets() {
+		if d := rl.Vector3Distance(pos, rl.Vector3Add(t.Pos, rl.NewVector3(0, 0.9, 0))); d < reach {
+			g.hurtTarget(t.ID, int(dmg*(1-d/reach)*damageScale()), "was blown up", true)
+		}
 	}
 	for _, e := range g.Enemies {
 		if e.Alive && rl.Vector3Distance(pos, e.Pos) < r*1.6 {
@@ -492,6 +593,7 @@ func (g *Game) blast(pos rl.Vector3, r, dmg float32) {
 	g.burst(pos, rl.NewColor(90, 90, 90, 255), int(r*12))
 	g.Shake = min(1.5, r/2.6)
 	g.Audio.Play(g.Audio.Explode, 1)
+	g.sendFx(Fx{Kind: FxExplosion, Pos: pos, N: int(r * 15), Shake: min(1.5, r/2.6)})
 }
 
 func (g *Game) burst(pos rl.Vector3, col rl.Color, n int) {
@@ -568,7 +670,12 @@ func (g *Game) updateBuilder(dt float32) {
 			p.Swing = 1
 			if p.MineT >= need {
 				p.Mining = false
-				g.breakBlock(a.X, a.Y, a.Z)
+				if g.isClient() {
+					g.sendToHost(&Msg{Break: &struct{ X, Y, Z int }{a.X, a.Y, a.Z}})
+					g.Audio.Play(g.Audio.Dig, 0.8)
+				} else {
+					g.breakBlock(a.X, a.Y, a.Z)
+				}
 			}
 		} else {
 			p.Mining = false
@@ -581,6 +688,10 @@ func (g *Game) updateBuilder(dt float32) {
 	}
 	if usePressed() && w.Get(a.X, a.Y, a.Z) == Bed {
 		g.Spawn = rl.NewVector3(float32(a.X)+0.5, float32(a.Y)+0.5, float32(a.Z)+0.5)
+		if g.isClient() {
+			g.say("Spawn point set. Only the host can skip the night", 2)
+			return
+		}
 		g.trySleep()
 		return
 	}
@@ -594,7 +705,15 @@ func (g *Game) updateBuilder(dt float32) {
 			free = free && (below == Grass || below == Dirt)
 		}
 		if w.InBounds(x, y, z) && free && !(held.Solid && g.blockOccupied(x, y, z)) {
-			w.Set(x, y, z, p.Held.Block)
+			if g.isClient() {
+				g.sendToHost(&Msg{Place: &struct {
+					X, Y, Z int
+					B       Block
+				}{x, y, z, p.Held.Block}})
+			} else {
+				w.Set(x, y, z, p.Held.Block)
+				g.sendFx(Fx{Kind: FxPlace, Pos: rl.NewVector3(float32(x), float32(y), float32(z))})
+			}
 			p.Inv[p.Held.Block]--
 			p.Swing = 1
 			g.Audio.Play(g.Audio.Place, 0.7)
@@ -637,6 +756,7 @@ func (g *Game) breakBlock(x, y, z int) {
 	}
 	g.burst(centre, info.Side, 12)
 	g.Audio.Play(g.Audio.Dig, 0.8)
+	g.sendFx(Fx{Kind: FxDig, Pos: centre, Color: info.Side, N: 12})
 	g.settle(x, y+1, z)
 }
 
@@ -877,15 +997,26 @@ func (g *Game) burnInLava(dt float32) {
 func (g *Game) respawn() {
 	p := g.Player
 	at := rl.NewVector3(p.Pos.X, p.Pos.Y+0.5, p.Pos.Z)
-	for b := Block(1); b < numBlocks; b++ {
-		if p.Inv[b] > 0 {
-			g.Drops = append(g.Drops, Drop{Pos: at, Vel: rl.NewVector3(rand.Float32()*2-1, 3, rand.Float32()*2-1), Block: b, Count: p.Inv[b]})
-			p.Inv[b] = 0
-		}
-	}
-	if p.Ammo+p.Reserve > 0 {
-		g.spawnDrop(at, 0, p.Ammo+p.Reserve)
+	if g.isClient() {
+		da := &struct {
+			Pos    rl.Vector3
+			Blocks [numBlocks]int
+			Ammo   int
+		}{Pos: at, Blocks: p.Inv, Ammo: p.Ammo + p.Reserve}
+		g.sendToHost(&Msg{DropAll: da})
+		p.Inv = [numBlocks]int{}
 		p.Ammo, p.Reserve = 0, 0
+	} else {
+		for b := Block(1); b < numBlocks; b++ {
+			if p.Inv[b] > 0 {
+				g.Drops = append(g.Drops, Drop{Pos: at, Vel: rl.NewVector3(rand.Float32()*2-1, 3, rand.Float32()*2-1), Block: b, Count: p.Inv[b]})
+				p.Inv[b] = 0
+			}
+		}
+		if p.Ammo+p.Reserve > 0 {
+			g.spawnDrop(at, 0, p.Ammo+p.Reserve)
+			p.Ammo, p.Reserve = 0, 0
+		}
 	}
 	p.Pos = g.Spawn
 	p.VelY = 0
@@ -895,7 +1026,9 @@ func (g *Game) respawn() {
 	p.EnsureHeld()
 	g.State = StatePlaying
 	g.say(fmt.Sprintf("Respawned. Your items lie at %d, %d, %d", floorI(at.X), floorI(at.Y), floorI(at.Z)), 4)
-	g.save()
+	if !g.isClient() {
+		g.save()
+	}
 }
 
 // giantSmash breaks the blocks in front of a giant so it can walk through anything but bedrock.
@@ -1038,6 +1171,12 @@ func (g *Game) update(dt float32) {
 		g.Audio.Play(g.Audio.Reload, 0.8)
 	}
 
+	if g.isClient() {
+		g.clientUpdate(dt)
+		return
+	}
+	g.assignIDs()
+
 	// Time of day.
 	g.Sky.Update(dt)
 	night := g.Sky.IsNight()
@@ -1057,14 +1196,18 @@ func (g *Game) update(dt float32) {
 		}
 	}
 
-	// Enemies.
-	g.Nav.Update(p.Pos, g.World)
+	// Enemies chase whoever is nearest.
+	targets := g.targets()
+	seeds := make([]rl.Vector3, len(targets))
+	for i, t := range targets {
+		seeds[i] = t.Pos
+	}
+	g.Nav.Update(seeds, g.World)
 	sunny := g.Sky.Elevation() > 0.08
 	for _, e := range g.Enemies {
 		fuseBefore := e.Fuse
-		if d := e.Update(dt, g.World, g.Nav, p, g.Enemies); d > 0 {
-			p.Hurt(int(float32(d)*damageScale()+0.5), "was slain by a "+e.Spec.Name, true)
-			g.Audio.Play(g.Audio.Hurt, 0.9)
+		if d := e.Update(dt, g.World, g.Nav, g.nearestTarget(e.Pos), g.Enemies); d > 0 {
+			g.hurtTarget(e.TargetID, int(float32(d)*damageScale()+0.5), "was slain by a "+e.Spec.Name, true)
 		}
 		if fuseBefore == 0 && e.Fuse > 0 {
 			g.Audio.Play(g.Audio.Fuse, 0.8)
@@ -1090,7 +1233,8 @@ func (g *Game) update(dt float32) {
 		}
 		if e.Shoot {
 			e.Shoot = false
-			g.shootArrow(rl.NewVector3(e.Pos.X, e.Pos.Y+e.HeadY(), e.Pos.Z), rl.Vector3Add(p.Pos, rl.NewVector3(0, 1.2, 0)))
+			tp := g.nearestTarget(e.Pos).Pos
+			g.shootArrow(rl.NewVector3(e.Pos.X, e.Pos.Y+e.HeadY(), e.Pos.Z), rl.Vector3Add(tp, rl.NewVector3(0, 1.2, 0)))
 		}
 		// Sunlight burns the undead.
 		if e.Alive && e.Spec.Burns && sunny && g.World.SkyExposed(rl.NewVector3(e.Pos.X, e.Pos.Y+e.Spec.Height, e.Pos.Z)) {
@@ -1128,7 +1272,42 @@ func (g *Game) update(dt float32) {
 	g.tickSpawners(dt)
 	g.updateSleep(dt)
 
-	// Effects.
+	g.tickEffects(dt)
+	g.checkDeath()
+}
+
+// clientUpdate is the per-frame work a joined player does locally: the host
+// owns the clock, hostiles, animals and drops.
+func (g *Game) clientUpdate(dt float32) {
+	p := g.Player
+	g.Sky.Update(dt) // smoothed between snapshots
+	// Walk-over pickup: ask the host for the item.
+	keep := g.Drops[:0]
+	for _, d := range g.Drops {
+		d.Spin += dt * 2
+		flat := rl.Vector3Distance(rl.NewVector3(d.Pos.X, 0, d.Pos.Z), rl.NewVector3(p.Pos.X, 0, p.Pos.Z))
+		if flat < 1.3 && math.Abs(float64(p.Pos.Y-d.Pos.Y)) < 1.8 {
+			g.sendToHost(&Msg{Pickup: &struct{ ID uint32 }{d.ID}})
+			continue
+		}
+		keep = append(keep, d)
+	}
+	g.Drops = keep
+	for _, e := range g.Enemies {
+		e.Phase += dt * e.Speed * 2
+	}
+	for _, a := range g.Animals {
+		if a.Alive && a.Phase != 0 {
+			a.Phase += dt * 2
+		}
+	}
+	g.updateSleep(dt)
+	g.tickEffects(dt)
+	g.checkDeath()
+}
+
+// tickEffects ages tracers, sparks and timers.
+func (g *Game) tickEffects(dt float32) {
 	tr := g.Tracers[:0]
 	for _, t := range g.Tracers {
 		t.Life -= dt
@@ -1151,8 +1330,6 @@ func (g *Game) update(dt float32) {
 	g.Flash = max(0, g.Flash-dt)
 	g.Shake = max(0, g.Shake-dt*1.5)
 	g.MsgT = max(0, g.MsgT-dt)
-
-	g.checkDeath()
 }
 
 // checkDeath moves to the death screen once health runs out.
@@ -1215,7 +1392,14 @@ func (g *Game) draw3D() {
 		a.Draw()
 	}
 	if g.ThirdPerson {
-		g.drawPlayerModel(w.Luminance(rl.NewVector3(p.Pos.X, p.Pos.Y+1, p.Pos.Z), env.Light))
+		g.drawHumanoid(g.localState(), p.EyeOff, p.SwordTier, p.PickTier, w.Luminance(rl.NewVector3(p.Pos.X, p.Pos.Y+1, p.Pos.Z), env.Light))
+	}
+	for _, r := range g.Remotes {
+		off := float32(0)
+		if r.Sneak {
+			off = 0.3
+		}
+		g.drawHumanoid(r.PlayerState, off, TierIron, TierIron, w.Luminance(rl.NewVector3(r.Pos.X, r.Pos.Y+1, r.Pos.Z), env.Light))
 	}
 	g.drawDrops()
 	g.drawArrows()
@@ -1270,13 +1454,17 @@ func (g *Game) draw3D() {
 	rl.EndMode3D()
 }
 
-// drawPlayerModel draws the blocky player seen from the third-person camera.
-func (g *Game) drawPlayerModel(lum float32) {
-	p := g.Player
-	fwd := p.FlatForward()
-	side := p.Right()
-	x, z := p.Pos.X, p.Pos.Z
-	y := p.Pos.Y - p.EyeOff*0.5
+// drawHumanoid draws a blocky player: the local one in third person, or a remote one.
+func (g *Game) drawHumanoid(ps PlayerState, eyeOff float32, swordTier, pickTier int, lum float32) {
+	fwd := rl.NewVector3(float32(math.Sin(float64(ps.Yaw))), 0, float32(math.Cos(float64(ps.Yaw))))
+	side := rl.NewVector3(float32(math.Cos(float64(ps.Yaw))), 0, -float32(math.Sin(float64(ps.Yaw))))
+	x, z := ps.Pos.X, ps.Pos.Z
+	y := ps.Pos.Y - eyeOff*0.5
+	p := struct {
+		BobPhase, BobAmount, Swing float32
+		Held                       Item
+		SwordTier, PickTier        int
+	}{ps.BobPhase, ps.BobAmt, ps.Swing, ps.Held, swordTier, pickTier}
 	skin := mul(rl.NewColor(200, 160, 120, 255), lum)
 	shirt := mul(rl.NewColor(60, 170, 170, 255), lum)
 	pants := mul(rl.NewColor(50, 60, 150, 255), lum)
@@ -1566,7 +1754,11 @@ func (g *Game) drawHUD() {
 	rl.DrawRectangle(20, 20, 360, 100, rl.NewColor(0, 0, 0, 140))
 	rl.DrawText(fmt.Sprintf("SCORE  %d", g.Score), 30, 28, 26, rl.White)
 	rl.DrawText(fmt.Sprintf("DAY %d  %s  %s", g.Sky.Day, g.Sky.TimeLabel(), g.clock()), 30, 62, 18, rl.LightGray)
-	rl.DrawText(fmt.Sprintf("HOSTILES %d    KILLS %d    BEST %d", g.aliveEnemies(), g.Kills, g.HighScore), 30, 88, 18, rl.Gold)
+	hostiles := g.aliveEnemies()
+	if g.isClient() {
+		hostiles = g.RemoteHostiles
+	}
+	rl.DrawText(fmt.Sprintf("HOSTILES %d    KILLS %d    BEST %d", hostiles, g.Kills, g.HighScore), 30, 88, 18, rl.Gold)
 
 	g.drawMinimap(sw)
 
@@ -1577,6 +1769,29 @@ func (g *Game) drawHUD() {
 		a := min(g.MsgT*2, 1)
 		rl.DrawText(g.Msg, cx-tw/2+2, 132, fs, rl.Fade(rl.Black, a))
 		rl.DrawText(g.Msg, cx-tw/2, 130, fs, rl.Fade(rl.Gold, a))
+	}
+
+	// Name tags over other players.
+	if len(g.Remotes) > 0 {
+		cam := g.camera()
+		fwd := rl.Vector3Normalize(rl.Vector3Subtract(cam.Target, cam.Position))
+		for _, r := range g.Remotes {
+			head := rl.Vector3Add(r.Pos, rl.NewVector3(0, playerHeight+0.4, 0))
+			if rl.Vector3DotProduct(rl.Vector3Subtract(head, cam.Position), fwd) <= 0.5 {
+				continue
+			}
+			sp := rl.GetWorldToScreen(head, cam)
+			tw := rl.MeasureText(r.Name, 16)
+			rl.DrawRectangle(int32(sp.X)-tw/2-4, int32(sp.Y)-10, tw+8, 20, rl.NewColor(0, 0, 0, 120))
+			rl.DrawText(r.Name, int32(sp.X)-tw/2, int32(sp.Y)-8, 16, rl.White)
+		}
+	}
+	if g.Net != nil {
+		status := fmt.Sprintf("%s   %d players", g.Net.Status, g.Net.PlayerCount())
+		if g.isClient() {
+			status = g.Net.Status
+		}
+		rl.DrawText(status, 30, 124, 14, rl.SkyBlue)
 	}
 
 	// Armour next to the hearts.
@@ -1832,6 +2047,52 @@ func (g *Game) drawOverlay() {
 	}
 }
 
+// netTestStep drives the scripted multiplayer check; returns true when finished.
+func (g *Game) netTestStep(role string, frame int) bool {
+	p, w := g.Player, g.World
+	if role == "host" {
+		if frame%30 == 0 && frame > 100 {
+			x, z := floorI(p.Pos.X)+rand.Intn(5)-2, floorI(p.Pos.Z)+rand.Intn(5)-2
+			y := w.SurfaceY(x, z) - 1
+			if y > 1 && w.Get(x, y, z) != Bedrock {
+				g.breakBlock(x, y, z)
+			}
+		}
+		if frame == 400 {
+			// Creepers do not burn in daylight, so the client should still see them.
+			for i := 0; i < 2; i++ {
+				q := w.RandomFreePoint(p.Pos, 8)
+				g.Enemies = append(g.Enemies, NewEnemy(q, KindCreeper, 1))
+			}
+		}
+		if frame == 1500 {
+			rl.TraceLog(rl.LogInfo, "NETTEST host: players=%d remotes=%d", g.Net.PlayerCount(), len(g.Remotes))
+			return true
+		}
+		return false
+	}
+	// Client: mine the block under the crosshair through the host, then report.
+	if frame == 200 {
+		p.Pitch = -1.2
+		p.Held = Item{Kind: ItemPickaxe}
+		if a := w.RayCastAny(p.Eye(), p.Forward(), reachDist); a.Hit {
+			g.sendToHost(&Msg{Break: &struct{ X, Y, Z int }{a.X, a.Y, a.Z}})
+			g.netTestCell = [3]int{a.X, a.Y, a.Z}
+			g.netTestWas = w.Get(a.X, a.Y, a.Z)
+		}
+		g.sendToHost(&Msg{Text: &struct{ Text string }{"hello from client"}})
+	}
+	if frame == 500 {
+		c := g.netTestCell
+		changed := w.Get(c[0], c[1], c[2]) != g.netTestWas
+		ok := g.Net != nil && g.Net.Snaps > 40 && g.Net.Blocks > 0 && len(g.Remotes) == 1 && changed && len(g.Enemies) > 0
+		rl.TraceLog(rl.LogInfo, "NETTEST client: ok=%v snaps=%d blocks=%d remotes=%d mined=%v enemies=%d drops=%d",
+			ok, g.Net.Snaps, g.Net.Blocks, len(g.Remotes), changed, len(g.Enemies), len(g.Drops))
+		return true
+	}
+	return false
+}
+
 // scriptedShots drives the screenshot session; returns true when finished.
 func (g *Game) scriptedShots(frame int) bool {
 	switch frame {
@@ -1926,6 +2187,14 @@ func (g *Game) scriptedShots(frame int) bool {
 }
 
 func main() {
+	hostAddr := flag.String("host", "", "host a world for others on this address, e.g. :7777")
+	joinAddr := flag.String("join", "", "join a hosted world, e.g. 192.168.1.10:7777")
+	name := flag.String("name", "", "your player name in multiplayer")
+	flag.Parse()
+	if *name == "" {
+		*name = fmt.Sprintf("Player%d", rand.Intn(900)+100)
+	}
+
 	rl.SetConfigFlags(rl.FlagVsyncHint | rl.FlagWindowResizable)
 	rl.InitWindow(1280, 720, "Blockworld")
 	if !rl.IsWindowReady() {
@@ -1942,11 +2211,58 @@ func main() {
 
 	g := NewGame()
 	defer g.Audio.Close()
+	g.Net = &Net{Name: *name}
+	switch {
+	case *hostAddr != "":
+		if saveExists() && g.load() {
+			g.say("Hosting the saved world", 3)
+		} else {
+			g.Reset()
+		}
+		if err := g.StartHost(*hostAddr); err != nil {
+			fmt.Fprintln(os.Stderr, "blockworld: cannot host:", err)
+			os.Exit(1)
+		}
+		g.Net.Name = *name
+		rl.DisableCursor()
+	case *joinAddr != "":
+		if err := g.Connect(*joinAddr, *name); err != nil {
+			fmt.Fprintln(os.Stderr, "blockworld: cannot join:", err)
+			os.Exit(1)
+		}
+		rl.DisableCursor()
+	default:
+		g.Net = nil
+	}
 
 	// BLOCKWORLD_SHOTS=1 runs a short scripted session that saves screenshots
 	// (day, night, crafting) into the working directory and exits; used for testing.
 	shots := os.Getenv("BLOCKWORLD_SHOTS") != ""
 	soak := os.Getenv("BLOCKWORLD_SOAK") != ""
+	netTest := os.Getenv("BLOCKWORLD_NETTEST") // "host" or "client": scripted multiplayer check
+	if netTest != "" {
+		rl.SetTargetFPS(60)
+		g.Net = &Net{Name: "Tester-" + netTest}
+		if netTest == "host" {
+			g.Reset()
+			if err := g.StartHost("127.0.0.1:7799"); err != nil {
+				fmt.Fprintln(os.Stderr, "NETTEST host failed:", err)
+				os.Exit(1)
+			}
+		} else {
+			var err error
+			for i := 0; i < 40; i++ {
+				if err = g.Connect("127.0.0.1:7799", "Tester-client"); err == nil {
+					break
+				}
+				time.Sleep(500 * time.Millisecond)
+			}
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "NETTEST client failed:", err)
+				os.Exit(1)
+			}
+		}
+	}
 	if soak {
 		rl.SetTargetFPS(0)
 	}
@@ -1954,6 +2270,17 @@ func main() {
 
 	for !rl.WindowShouldClose() {
 		dt := min(rl.GetFrameTime(), 0.05)
+		if g.isHost() {
+			g.HostTick()
+		} else if g.isClient() {
+			g.ClientTick()
+		}
+		if netTest != "" {
+			frame++
+			if g.netTestStep(netTest, frame) {
+				break
+			}
+		}
 		if shots || soak {
 			frame++
 			done := false
@@ -2019,7 +2346,7 @@ func main() {
 				rl.DisableCursor()
 				rl.GetMouseDelta()
 			} else if rl.IsKeyPressed(rl.KeyQ) {
-				g.save()
+				g.leaveWorld()
 				g.State = StateMenu
 			}
 		case StateGameOver:
@@ -2056,6 +2383,21 @@ func main() {
 		rl.EndDrawing()
 	}
 	if g.State != StateMenu && !shots && !soak {
-		g.save() // closing the window keeps the world
+		g.leaveWorld() // closing the window keeps the world
+	}
+}
+
+// leaveWorld saves (host or solo) or disconnects (client).
+func (g *Game) leaveWorld() {
+	if g.isClient() {
+		g.Net.server.conn.Close()
+		g.Net = nil
+		return
+	}
+	g.save()
+	if g.isHost() {
+		g.Net.listener.Close()
+		g.Net.broadcast(&Msg{Leave: &struct{ ID uint32 }{0}}, 0)
+		g.Net = nil
 	}
 }

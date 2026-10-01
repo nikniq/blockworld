@@ -37,6 +37,7 @@ var animalKinds = [...]animalSpec{
 }
 
 type Animal struct {
+	ID      uint32
 	Kind    AnimalKind
 	Spec    *animalSpec
 	Pos     rl.Vector3
@@ -64,7 +65,7 @@ func (a *Animal) BB() rl.BoundingBox {
 	return rl.NewBoundingBox(rl.NewVector3(a.Pos.X-r, a.Pos.Y, a.Pos.Z-r), rl.NewVector3(a.Pos.X+r, a.Pos.Y+a.Spec.Height, a.Pos.Z+r))
 }
 
-func (a *Animal) Update(dt float32, w *World, p *Player) {
+func (a *Animal) Update(dt float32, w *World, p Target) {
 	if !a.Alive {
 		a.DeathT += dt
 		return
@@ -193,7 +194,7 @@ func (g *Game) updateAnimals(dt float32) {
 	alive := 0
 	keep := g.Animals[:0]
 	for _, a := range g.Animals {
-		a.Update(dt, g.World, g.Player)
+		a.Update(dt, g.World, g.nearestTarget(a.Pos))
 		if a.Alive {
 			alive++
 		}

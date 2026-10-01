@@ -30,7 +30,6 @@ func (g *Game) shootArrow(from rl.Vector3, target rl.Vector3) {
 }
 
 func (g *Game) updateArrows(dt float32) {
-	p := g.Player
 	keep := g.Arrows[:0]
 	for i := range g.Arrows {
 		a := &g.Arrows[i]
@@ -41,11 +40,17 @@ func (g *Game) updateArrows(dt float32) {
 		if a.Life <= 0 {
 			continue
 		}
-		// Hit the player?
+		// Hit a player?
 		ray := rl.NewRay(a.Pos, rl.Vector3Normalize(step))
-		if c := rl.GetRayCollisionBox(ray, p.Box()); c.Hit && c.Distance <= rl.Vector3Length(step) {
-			p.Damage(arrowDamage)
-			g.Audio.Play(g.Audio.Hurt, 0.8)
+		hit := false
+		for _, t := range g.targets() {
+			if c := rl.GetRayCollisionBox(ray, t.Box); c.Hit && c.Distance <= rl.Vector3Length(step) {
+				g.hurtTarget(t.ID, int(float32(arrowDamage)*damageScale()+0.5), "was shot by a Skeleton", true)
+				hit = true
+				break
+			}
+		}
+		if hit {
 			continue
 		}
 		// Hit a block?

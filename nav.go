@@ -20,8 +20,7 @@ type NavGrid struct {
 	Height  []int
 	Dist    []int32
 	queue   []int32
-	seedX   int
-	seedZ   int
+	seeds   []int32 // seed cells of the last build
 	valid   bool
 	version int
 }
@@ -76,16 +75,25 @@ func (g *NavGrid) canStep(ax, az, bx, bz int) bool {
 	return dh <= navStepUp && -dh <= navDropDown
 }
 
-// Update rebuilds the field if the world changed or the target moved to another cell.
-func (g *NavGrid) Update(target rl.Vector3, w *World) {
+// Update rebuilds the field if the world changed or any target moved to
+// another cell. With several targets the field leads to the nearest one.
+func (g *NavGrid) Update(targets []rl.Vector3, w *World) {
 	if w.Version != g.version {
 		g.refresh(w)
 	}
-	tx, tz := g.cellOf(target)
-	if g.valid && tx == g.seedX && tz == g.seedZ {
+	cells := make([]int32, 0, len(targets))
+	for _, t := range targets {
+		tx, tz := g.cellOf(t)
+		cells = append(cells, int32(tz*g.N+tx))
+	}
+	same := g.valid && len(cells) == len(g.seeds)
+	for i := 0; same && i < len(cells); i++ {
+		same = cells[i] == g.seeds[i]
+	}
+	if same {
 		return
 	}
-	g.seedX, g.seedZ, g.valid = tx, tz, true
+	g.seeds, g.valid = cells, true
 	for i := range g.Dist {
 		g.Dist[i] = -1
 	}
@@ -96,12 +104,16 @@ func (g *NavGrid) Update(target rl.Vector3, w *World) {
 			g.queue = append(g.queue, int32(z*g.N+x))
 		}
 	}
-	if g.walkable(tx, tz) {
-		seed(tx, tz)
-	} else {
+	for _, c := range cells {
+		tx, tz := int(c)%g.N, int(c)/g.N
+		if g.walkable(tx, tz) {
+			seed(tx, tz)
+			continue
+		}
 		// Target is somewhere unwalkable (inside a tree canopy, on a pillar):
 		// seed the nearest ring of walkable cells around it.
-		for r := 1; r < g.N && len(g.queue) == 0; r++ {
+		before := len(g.queue)
+		for r := 1; r < g.N && len(g.queue) == before; r++ {
 			for dz := -r; dz <= r; dz++ {
 				for dx := -r; dx <= r; dx++ {
 					seed(tx+dx, tz+dz)

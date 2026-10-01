@@ -10,6 +10,7 @@ import (
 // Drop is an item lying in the world: a block (or ammo) that pops out of mined
 // blocks and slain hostiles and is collected by walking over it.
 type Drop struct {
+	ID    uint32
 	Pos   rl.Vector3
 	Vel   rl.Vector3
 	Block Block

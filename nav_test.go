@@ -14,7 +14,7 @@ func TestNavFieldReachesSpawn(t *testing.T) {
 	w := NewWorld()
 	nav := NewNavGrid(w)
 	spawn := w.SpawnPoint()
-	nav.Update(spawn, w)
+	nav.Update([]rl.Vector3{spawn}, w)
 	walkable, reachable := 0, 0
 	for i, ok := range nav.Walk {
 		if ok {
@@ -64,7 +64,7 @@ func TestNavRefreshOnEdit(t *testing.T) {
 	rand.Seed(2)
 	w := NewWorld()
 	nav := NewNavGrid(w)
-	nav.Update(w.SpawnPoint(), w)
+	nav.Update([]rl.Vector3{w.SpawnPoint()}, w)
 	x, z := 3, 3
 	h := w.SurfaceY(x, z)
 	// Level the neighbour column to the same height, then raise a 2-block pillar.
@@ -78,7 +78,7 @@ func TestNavRefreshOnEdit(t *testing.T) {
 	for y := h; y < h+2; y++ {
 		w.Set(x, y, z, StoneBrick)
 	}
-	nav.Update(w.SpawnPoint(), w)
+	nav.Update([]rl.Vector3{w.SpawnPoint()}, w)
 	lx, lz := x-originX, z-originZ
 	if nav.Height[lz*nav.N+lx] != h+2 {
 		t.Fatalf("nav height not refreshed: got %d want %d", nav.Height[lz*nav.N+lx], h+2)

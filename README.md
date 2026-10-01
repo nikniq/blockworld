@@ -77,6 +77,25 @@ block textures and sound effects are generated at startup.
 | Q (paused or dead) | Back to menu |
 | Enter (menu or dead) | Start / restart |
 
+## Multiplayer
+
+One player hosts; the host's machine owns the world, the clock, hostiles, animals and drops, and
+streams them to everyone else over TCP. Joined players move, mine, build, fight, craft and eat as
+usual; their actions are sent to the host, which applies them and broadcasts the result.
+
+```sh
+# Host (continues your saved world if there is one, otherwise a new one):
+./blockworld -host :7777 -name Alice
+
+# Join from another machine on the same network:
+./blockworld -join 192.168.1.10:7777 -name Bob
+```
+
+Open port 7777 on the host's firewall for LAN play. Over the internet, forward the port on the
+host's router or use a tunnel such as Tailscale. Only the host can save and sleep through the night;
+beds still set each player's own spawn point. Hostiles chase whichever player is nearest.
+Other players are drawn as blocky figures with name tags.
+
 ## Requirements
 
 - Go 1.22 or newer
@@ -121,6 +140,8 @@ Because raylib is built through cgo, each binary must be compiled on its own pla
 Setting `BLOCKWORLD_SHOTS=1` runs a short scripted session that writes sky, day, night, crafting and cave screenshots
 to the working directory and exits. `BLOCKWORLD_SOAK=1` runs a 4000-frame stress session (rapid mining, building,
 day/night cycling, hostiles, explosions, TNT, animals, crafting, save/load) and exits; it is meant to shake out crashes.
+`BLOCKWORLD_NETTEST=host` and `BLOCKWORLD_NETTEST=client`, run as two processes, perform a scripted
+multiplayer session on port 7799 and log whether the client received the world, snapshots and block updates.
 
 ## Code layout
 
@@ -135,6 +156,7 @@ day/night cycling, hostiles, explosions, TNT, animals, crafting, save/load) and 
 | `save.go` | Saving and loading a run (gzip + gob in the user config directory) |
 | `settings.go` | Mouse sensitivity, volume, invert Y and fullscreen preferences |
 | `arrows.go` | Skeleton arrows |
+| `net.go` | Multiplayer: host listener, client connection, gob messages, snapshots |
 | `sky.go` | Day/night cycle, sky and fog colours, sun, moon, stars and clouds |
 | `world.go` | Voxel volume, terrain/cave/ore generation, sunlight and torch light propagation, chunk meshing with ambient occlusion and smooth lighting, terrain and entity shaders (fog, daylight), collision, DDA raycast, spawn points |
 | `textures.go` | Procedural 16x16 block texture atlas |

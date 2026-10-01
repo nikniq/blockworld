@@ -241,11 +241,12 @@ type Env struct {
 // World holds the voxel volume, per-column heights and chunk meshes.
 type World struct {
 	Blocks  []Block
-	Height  []int        // per column (z*worldW+x): top of the column (highest non-air, including water) + 1
-	Ground  []int        // per column: feet level on the highest solid block
-	Light   []uint8      // per cell: sunlight in the high nibble, block light in the low nibble
-	Version int          // bumped on every block change; the nav grid watches it
-	relight map[int]bool // chunks whose lighting must be recomputed
+	Height  []int                      // per column (z*worldW+x): top of the column (highest non-air, including water) + 1
+	Ground  []int                      // per column: feet level on the highest solid block
+	Light   []uint8                    // per cell: sunlight in the high nibble, block light in the low nibble
+	Version int                        // bumped on every block change; the nav grid watches it
+	OnSet   func(x, y, z int, b Block) // called after every Set (multiplayer broadcast)
+	relight map[int]bool               // chunks whose lighting must be recomputed
 	chunks  []*chunk
 	ncx     int
 	ncz     int
@@ -928,6 +929,9 @@ func (w *World) Set(x, y, z int, b Block) {
 	w.Version++
 	cx, cz := lx/chunkSize, lz/chunkSize
 	w.relight[cz*w.ncx+cx] = true
+	if w.OnSet != nil {
+		w.OnSet(x, y, z, b)
+	}
 	mark := func(i, j int) {
 		if i >= 0 && j >= 0 && i < w.ncx && j < w.ncz {
 			w.chunks[j*w.ncx+i].dirty = true

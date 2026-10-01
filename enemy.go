@@ -50,7 +50,17 @@ var kinds = [...]kindSpec{
 	KindGiant:    {"Giant", 60, 1.3, 0.8, 4.2, 0.7, 40, 1500, rl.NewColor(60, 110, 60, 255), rl.NewColor(80, 150, 70, 255), rl.NewColor(255, 60, 60, 255), false, false, false, true},
 }
 
+// Target is something hostiles chase: the local player or a remote one.
+type Target struct {
+	ID  uint32 // 0 is the local player
+	Pos rl.Vector3
+	Eye rl.Vector3
+	Box rl.BoundingBox
+}
+
 type Enemy struct {
+	ID       uint32
+	TargetID uint32 // who the last Update chased
 	Kind     EnemyKind
 	Spec     *kindSpec
 	Pos      rl.Vector3
@@ -114,7 +124,8 @@ func (e *Enemy) AttackRange() float32 { return e.Spec.Radius + playerHalfW + 0.9
 // Update steers toward the player (directly when adjacent, otherwise along the
 // nav field), walks with gravity and one-block step-ups, and attacks when close.
 // Returns melee damage dealt this frame.
-func (e *Enemy) Update(dt float32, w *World, nav *NavGrid, p *Player, others []*Enemy) int {
+func (e *Enemy) Update(dt float32, w *World, nav *NavGrid, p Target, others []*Enemy) int {
+	e.TargetID = p.ID
 	if !e.Alive {
 		e.DeathT += dt
 		return 0
@@ -150,7 +161,7 @@ func (e *Enemy) Update(dt float32, w *World, nav *NavGrid, p *Player, others []*
 	e.ShootCD = max(0, e.ShootCD-dt)
 	if e.Spec.Ranged {
 		eye := rl.NewVector3(e.Pos.X, e.Pos.Y+e.HeadY(), e.Pos.Z)
-		target := p.Eye()
+		target := p.Eye
 		clear := !w.RayCast(eye, rl.Vector3Subtract(target, eye), rl.Vector3Distance(eye, target)).Hit
 		if clear && dist < 16 && e.ShootCD == 0 {
 			e.ShootCD = 2.2
