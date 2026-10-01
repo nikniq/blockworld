@@ -1,0 +1,45 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install raylib build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libgl1-mesa-dev libx11-dev libxi-dev \
+            libxcursor-dev libxrandr-dev libxinerama-dev libwayland-dev libxkbcommon-dev
+      - name: Build
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            go build -ldflags="-s -w -H windowsgui" -o blockworld.exe .
+          else
+            go build -ldflags="-s -w" -o blockworld .
+          fi
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./...
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blockworld-${{ matrix.os }}
+          path: |
+            blockworld
+            blockworld.exe
+          if-no-files-found: ignore
