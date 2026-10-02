@@ -503,3 +503,14 @@ func TestDungeonsAndLoot(t *testing.T) {
 		t.Fatal("giant should have smashed the wall")
 	}
 }
+
+// D must strafe toward the camera's right: forward x up, as raylib's camera defines it.
+func TestRightIsRight(t *testing.T) {
+	for _, yaw := range []float32{0, 0.7, 1.9, 3.1, 4.4} {
+		p := &Player{Yaw: yaw}
+		want := rl.Vector3CrossProduct(p.FlatForward(), rl.NewVector3(0, 1, 0))
+		if rl.Vector3Distance(p.Right(), want) > 1e-5 {
+			t.Fatalf("yaw %.1f: Right()=%v want %v", yaw, p.Right(), want)
+		}
+	}
+}

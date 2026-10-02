@@ -1457,7 +1457,7 @@ func (g *Game) draw3D() {
 // drawHumanoid draws a blocky player: the local one in third person, or a remote one.
 func (g *Game) drawHumanoid(ps PlayerState, eyeOff float32, swordTier, pickTier int, lum float32) {
 	fwd := rl.NewVector3(float32(math.Sin(float64(ps.Yaw))), 0, float32(math.Cos(float64(ps.Yaw))))
-	side := rl.NewVector3(float32(math.Cos(float64(ps.Yaw))), 0, -float32(math.Sin(float64(ps.Yaw))))
+	side := rl.NewVector3(-float32(math.Cos(float64(ps.Yaw))), 0, float32(math.Sin(float64(ps.Yaw))))
 	x, z := ps.Pos.X, ps.Pos.Z
 	y := ps.Pos.Y - eyeOff*0.5
 	p := struct {

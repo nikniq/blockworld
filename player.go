@@ -123,8 +123,9 @@ func (p *Player) FlatForward() rl.Vector3 {
 	return rl.NewVector3(float32(math.Sin(float64(p.Yaw))), 0, float32(math.Cos(float64(p.Yaw))))
 }
 
+// Right is forward x up: the direction D strafes toward.
 func (p *Player) Right() rl.Vector3 {
-	return rl.NewVector3(float32(math.Cos(float64(p.Yaw))), 0, -float32(math.Sin(float64(p.Yaw))))
+	return rl.NewVector3(-float32(math.Cos(float64(p.Yaw))), 0, float32(math.Sin(float64(p.Yaw))))
 }
 
 func (p *Player) Eye() rl.Vector3 {
