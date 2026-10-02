@@ -16,6 +16,7 @@ const (
 	jumpSpeed    = 6.9 // clears just over one block
 	gravity      = 19.0
 	mouseSens    = 0.0022
+	keyLookSpeed = 2.4 // radians per second of arrow-key turning at sensitivity 1
 	magSize      = 12
 	fireInterval = 0.16
 	reloadTime   = 1.4
@@ -253,6 +254,24 @@ func (p *Player) Update(dt float32, w *World) {
 		md.Y = -md.Y
 	}
 	p.Pitch -= md.Y * mouseSens * settings.Sensitivity
+	// Arrow keys turn and tilt the view like the mouse.
+	turn := keyLookSpeed * settings.Sensitivity * dt
+	if rl.IsKeyDown(rl.KeyLeft) {
+		p.Yaw += turn
+	}
+	if rl.IsKeyDown(rl.KeyRight) {
+		p.Yaw -= turn
+	}
+	tilt := turn * 0.7
+	if settings.InvertY {
+		tilt = -tilt
+	}
+	if rl.IsKeyDown(rl.KeyUp) {
+		p.Pitch += tilt
+	}
+	if rl.IsKeyDown(rl.KeyDown) {
+		p.Pitch -= tilt
+	}
 	p.Pitch = clamp(p.Pitch, -1.55, 1.55)
 
 	// Hotbar selection.

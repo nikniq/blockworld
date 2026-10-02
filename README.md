@@ -57,7 +57,7 @@ block textures and sound effects are generated at startup.
 
 | Input | Action |
 |---|---|
-| Mouse | Look |
+| Mouse or arrow keys | Look |
 | W A S D | Move |
 | Left Ctrl | Sprint |
 | Left Shift | Sneak |

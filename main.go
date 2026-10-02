@@ -1852,7 +1852,7 @@ func (g *Game) drawHelp(sw, sh int32) {
 		attack, use = "RIGHT CLICK", "LEFT CLICK"
 	}
 	lines := []string{
-		"WASD move   CTRL sprint   SHIFT sneak   SPACE jump / swim / climb",
+		"WASD move   ARROWS look   CTRL sprint   SHIFT sneak   SPACE jump / swim / climb",
 		"1-9 / wheel: hotbar   " + attack + ": shoot, swing, mine   " + use + ": place, eat, use bed   (B in pause swaps)",
 		"E crafting   R reload   F5 third person   F11 fullscreen   ESC pause and settings",
 		"Torches keep hostiles from rising nearby. Undead burn at sunrise. Creepers explode.",
@@ -1999,7 +1999,7 @@ func (g *Game) drawOverlay() {
 	case StateMenu:
 		centered("BLOCKWORLD", sh/2-200, 72, rl.Gold)
 		centered("Mine by day. Survive the night.", sh/2-120, 24, rl.LightGray)
-		centered("WASD move   CTRL sprint   SHIFT sneak   SPACE jump / swim   MOUSE look", sh/2-60, 19, rl.White)
+		centered("WASD move   MOUSE or ARROW KEYS look   CTRL sprint   SHIFT sneak   SPACE jump / swim", sh/2-60, 19, rl.White)
 		centered("1-9 / WHEEL pick hotbar item      LEFT CLICK mine, swing or shoot      RIGHT CLICK place", sh/2-32, 19, rl.White)
 		centered("E crafting      R reload      ESC pause", sh/2-4, 19, rl.White)
 		centered("Dig for coal, iron, gold and diamonds. Craft better pickaxes, swords and rifle ammo.", sh/2+40, 18, rl.LightGray)
