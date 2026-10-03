@@ -2179,6 +2179,15 @@ func (g *Game) drawJoin() {
 // scriptedShots drives the screenshot session; returns true when finished.
 func (g *Game) scriptedShots(frame int) bool {
 	switch frame {
+	case 18:
+		rl.TakeScreenshot("shot_menu.png")
+	case 20:
+		g.State = StateJoin
+		g.JoinText = "192.168.1.10:7777"
+	case 26:
+		rl.TakeScreenshot("shot_join.png")
+	case 28:
+		g.State = StateMenu
 	case 30:
 		g.Reset()
 		g.Player.Pitch = 0.08

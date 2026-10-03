@@ -514,3 +514,13 @@ func TestRightIsRight(t *testing.T) {
 		}
 	}
 }
+
+// The local player state must be available offline (third-person view uses it).
+func TestLocalStateOffline(t *testing.T) {
+	g := &Game{Audio: &Audio{}, CraftHover: -1}
+	g.Reset()
+	st := g.localState()
+	if st.Pos != g.Player.Pos || st.ID != 0 {
+		t.Fatalf("bad offline state %+v", st)
+	}
+}

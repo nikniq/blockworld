@@ -389,7 +389,12 @@ func (g *Game) HostTick() {
 
 func (g *Game) localState() PlayerState {
 	p := g.Player
-	return PlayerState{ID: g.Net.MyID, Name: g.Net.Name, Pos: p.Pos, Yaw: p.Yaw, Pitch: p.Pitch, HP: p.HP, Held: p.Held, Sneak: p.Sneak, Swing: p.Swing, BobPhase: p.BobPhase, BobAmt: p.BobAmount}
+	var id uint32
+	name := playerName
+	if g.Net != nil {
+		id, name = g.Net.MyID, g.Net.Name
+	}
+	return PlayerState{ID: id, Name: name, Pos: p.Pos, Yaw: p.Yaw, Pitch: p.Pitch, HP: p.HP, Held: p.Held, Sneak: p.Sneak, Swing: p.Swing, BobPhase: p.BobPhase, BobAmt: p.BobAmount}
 }
 
 func (g *Game) makeSnapshot() *Snapshot {
