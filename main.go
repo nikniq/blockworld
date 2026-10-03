@@ -73,6 +73,7 @@ type Game struct {
 	Net            *Net
 	JoinText       string
 	JoinErr        string
+	JoinField      int // 0 address, 1 name
 	netTestCell    [3]int
 	netTestWas     Block
 	Remotes        map[uint32]*RemotePlayer
@@ -1793,9 +1794,9 @@ func (g *Game) drawHUD() {
 		}
 	}
 	if g.Net != nil {
-		status := fmt.Sprintf("%s   %d players", g.Net.Status, g.Net.PlayerCount())
+		status := fmt.Sprintf("You are %s   %s   %d players", g.Net.Name, g.Net.Status, g.Net.PlayerCount())
 		if g.isClient() {
-			status = g.Net.Status
+			status = fmt.Sprintf("You are %s   %s", g.Net.Name, g.Net.Status)
 		}
 		rl.DrawText(status, 30, 124, 14, rl.SkyBlue)
 	}
@@ -2014,7 +2015,7 @@ func (g *Game) drawOverlay() {
 		if saveExists() {
 			centered("C  continue saved world", sh/2+134, 24, rl.SkyBlue)
 		}
-		centered("H  host your world for friends        J  join a friend's world", sh/2+166, 22, rl.SkyBlue)
+		centered(fmt.Sprintf("H  host your world for friends        J  join a friend's world        (you are %s)", playerName), sh/2+166, 22, rl.SkyBlue)
 		if g.JoinErr != "" {
 			centered(g.JoinErr, sh/2+196, 18, rl.Orange)
 		}
@@ -2121,24 +2122,39 @@ func (g *Game) hostFromMenu() {
 	rl.DisableCursor()
 }
 
-// updateJoin edits the address box and connects on Enter.
+// updateJoin edits the address and name boxes and connects on Enter.
 func (g *Game) updateJoin() {
+	field := &g.JoinText
+	limit := 60
+	if g.JoinField == 1 {
+		field = &playerName
+		limit = 16
+	}
 	for ch := rl.GetCharPressed(); ch > 0; ch = rl.GetCharPressed() {
-		if ch >= 32 && ch < 127 && len(g.JoinText) < 60 {
-			g.JoinText += string(rune(ch))
+		if ch >= 32 && ch < 127 && len(*field) < limit {
+			*field += string(rune(ch))
 		}
 	}
-	if (rl.IsKeyPressed(rl.KeyBackspace) || rl.IsKeyPressedRepeat(rl.KeyBackspace)) && len(g.JoinText) > 0 {
-		g.JoinText = g.JoinText[:len(g.JoinText)-1]
+	if (rl.IsKeyPressed(rl.KeyBackspace) || rl.IsKeyPressedRepeat(rl.KeyBackspace)) && len(*field) > 0 {
+		*field = (*field)[:len(*field)-1]
 	}
 	if rl.IsKeyPressed(rl.KeyV) && (rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyLeftSuper)) {
-		g.JoinText += rl.GetClipboardText()
+		*field += rl.GetClipboardText()
+	}
+	if rl.IsKeyPressed(rl.KeyTab) {
+		g.JoinField = 1 - g.JoinField
 	}
 	if rl.IsKeyPressed(rl.KeyEscape) {
+		settings.Name = playerName
+		settings.save()
 		g.State = StateMenu
 		return
 	}
 	if rl.IsKeyPressed(rl.KeyEnter) && g.JoinText != "" {
+		if strings.TrimSpace(playerName) == "" {
+			playerName = fmt.Sprintf("Player%d", rand.Intn(900)+100)
+		}
+		settings.Name = playerName
 		addr := g.JoinText
 		if !strings.Contains(addr, ":") {
 			addr += defaultPort
@@ -2159,21 +2175,31 @@ func (g *Game) updateJoin() {
 func (g *Game) drawJoin() {
 	sw, sh := int32(rl.GetScreenWidth()), int32(rl.GetScreenHeight())
 	rl.DrawRectangle(0, 0, sw, sh, rl.NewColor(0, 0, 0, 170))
-	centered("JOIN A WORLD", sh/2-120, 48, rl.Gold)
-	centered("Type the host's address (port 7777 is assumed), then press ENTER", sh/2-50, 20, rl.LightGray)
+	centered("JOIN A WORLD", sh/2-150, 48, rl.Gold)
+	centered("Host address (port 7777 is assumed) and your name, then ENTER.  TAB switches boxes", sh/2-80, 20, rl.LightGray)
 	w := int32(520)
 	x := sw/2 - w/2
-	rl.DrawRectangle(x, sh/2-10, w, 44, rl.NewColor(30, 30, 36, 255))
-	rl.DrawRectangleLines(x, sh/2-10, w, 44, rl.White)
 	caret := ""
 	if int(rl.GetTime()*2)%2 == 0 {
 		caret = "_"
 	}
-	rl.DrawText(g.JoinText+caret, x+12, sh/2, 26, rl.White)
-	if g.JoinErr != "" {
-		centered(g.JoinErr, sh/2+60, 20, rl.Orange)
+	box := func(y int32, label, text string, active bool) {
+		rl.DrawText(label, x, y-20, 16, rl.LightGray)
+		rl.DrawRectangle(x, y, w, 44, rl.NewColor(30, 30, 36, 255))
+		col := rl.Gray
+		if active {
+			col = rl.White
+			text += caret
+		}
+		rl.DrawRectangleLines(x, y, w, 44, col)
+		rl.DrawText(text, x+12, y+10, 26, rl.White)
 	}
-	centered("ESC back     CTRL+V paste", sh/2+110, 18, rl.LightGray)
+	box(sh/2-30, "ADDRESS", g.JoinText, g.JoinField == 0)
+	box(sh/2+50, "YOUR NAME", playerName, g.JoinField == 1)
+	if g.JoinErr != "" {
+		centered(g.JoinErr, sh/2+120, 20, rl.Orange)
+	}
+	centered("ESC back     CTRL+V paste", sh/2+160, 18, rl.LightGray)
 }
 
 // scriptedShots drives the screenshot session; returns true when finished.
@@ -2283,9 +2309,6 @@ func main() {
 	joinAddr := flag.String("join", "", "join a hosted world, e.g. 192.168.1.10:7777")
 	name := flag.String("name", "", "your player name in multiplayer")
 	flag.Parse()
-	if *name == "" {
-		*name = fmt.Sprintf("Player%d", rand.Intn(900)+100)
-	}
 	playerName = *name
 
 	rl.SetConfigFlags(rl.FlagVsyncHint | rl.FlagWindowResizable)
@@ -2298,6 +2321,12 @@ func main() {
 	rl.SetTargetFPS(144)
 	rl.SetExitKey(rl.KeyNull)
 	settings = loadSettings()
+	if playerName == "" {
+		playerName = settings.Name
+	}
+	if playerName == "" {
+		playerName = fmt.Sprintf("Player%d", rand.Intn(900)+100)
+	}
 	if settings.Fullscreen {
 		rl.ToggleBorderlessWindowed()
 	}

@@ -279,7 +279,7 @@ func (g *Game) StartHost(addr string) error {
 	if err != nil {
 		return err
 	}
-	n := &Net{Role: RoleHost, Addr: ln.Addr().String(), Name: g.Net.Name, inbox: make(chan inMsg, 4096), peers: map[uint32]*peer{}, nextID: 1, listener: ln}
+	n := &Net{Role: RoleHost, Addr: ln.Addr().String(), Name: g.Net.Name, MyID: 1, inbox: make(chan inMsg, 4096), peers: map[uint32]*peer{}, nextID: 2, listener: ln}
 	g.Net = n
 	g.World.OnSet = func(x, y, z int, b Block) {
 		n.broadcast(&Msg{Block: &struct {

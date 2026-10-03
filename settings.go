@@ -19,6 +19,7 @@ type Settings struct {
 	SwapButtons bool // right click mines and shoots, left click places and uses
 	Difficulty  int  // 0 peaceful, 1 normal, 2 hard
 	LastJoin    string
+	Name        string // player name shown to others
 }
 
 var difficultyNames = [...]string{"Peaceful", "Normal", "Hard"}
@@ -69,6 +70,8 @@ func loadSettings() Settings {
 			s.SwapButtons = v == "true"
 		case "last_join":
 			s.LastJoin = v
+		case "name":
+			s.Name = v
 		case "difficulty":
 			if n, err := strconv.Atoi(v); err == nil && n >= 0 && n <= 2 {
 				s.Difficulty = n
@@ -86,7 +89,7 @@ func (s Settings) save() {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return
 	}
-	text := fmt.Sprintf("sensitivity=%.2f\nvolume=%.2f\ninvert_y=%t\nfullscreen=%t\nswap_buttons=%t\ndifficulty=%d\nlast_join=%s\n", s.Sensitivity, s.Volume, s.InvertY, s.Fullscreen, s.SwapButtons, s.Difficulty, s.LastJoin)
+	text := fmt.Sprintf("sensitivity=%.2f\nvolume=%.2f\ninvert_y=%t\nfullscreen=%t\nswap_buttons=%t\ndifficulty=%d\nlast_join=%s\nname=%s\n", s.Sensitivity, s.Volume, s.InvertY, s.Fullscreen, s.SwapButtons, s.Difficulty, s.LastJoin, s.Name)
 	_ = os.WriteFile(p, []byte(text), 0o644)
 }
 

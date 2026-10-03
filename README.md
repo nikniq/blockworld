@@ -84,7 +84,8 @@ streams them to everyone else over TCP. Joined players move, mine, build, fight,
 usual; their actions are sent to the host, which applies them and broadcasts the result.
 
 From the main menu press **H** to host (the screen then shows the address friends should type) or
-**J** to type a host's address and join. The same works from the command line:
+**J** to type a host's address and your name and join. Names are remembered between runs; every
+window shows "You are ..." while online. The same works from the command line:
 
 ```sh
 # Host (continues your saved world if there is one, otherwise a new one):
