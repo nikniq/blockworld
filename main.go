@@ -8,6 +8,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"strings"
 	"time"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -23,7 +24,10 @@ const (
 	StatePaused
 	StateCrafting
 	StateGameOver
+	StateJoin
 )
+
+var playerName string
 
 // Primed is a block of TNT with a lit fuse.
 type Primed struct {
@@ -67,6 +71,8 @@ type Game struct {
 	SpawnerCD   float32
 
 	Net            *Net
+	JoinText       string
+	JoinErr        string
 	netTestCell    [3]int
 	netTestWas     Block
 	Remotes        map[uint32]*RemotePlayer
@@ -2004,12 +2010,16 @@ func (g *Game) drawOverlay() {
 		centered("E crafting      R reload      ESC pause", sh/2-4, 19, rl.White)
 		centered("Dig for coal, iron, gold and diamonds. Craft better pickaxes, swords and rifle ammo.", sh/2+40, 18, rl.LightGray)
 		centered("Zombies, spiders and creepers rise at night. Undead burn at sunrise. Creepers explode.", sh/2+64, 18, rl.LightGray)
-		centered("Press ENTER or CLICK to start a new world", sh/2+120, 28, rl.Lime)
+		centered("Press ENTER or CLICK to start a new world", sh/2+100, 28, rl.Lime)
 		if saveExists() {
-			centered("C  continue saved world", sh/2+150, 24, rl.SkyBlue)
+			centered("C  continue saved world", sh/2+134, 24, rl.SkyBlue)
+		}
+		centered("H  host your world for friends        J  join a friend's world", sh/2+166, 22, rl.SkyBlue)
+		if g.JoinErr != "" {
+			centered(g.JoinErr, sh/2+196, 18, rl.Orange)
 		}
 		if g.HighScore > 0 {
-			centered(fmt.Sprintf("High score  %d", g.HighScore), sh/2+190, 22, rl.Gold)
+			centered(fmt.Sprintf("High score  %d", g.HighScore), sh/2+226, 22, rl.Gold)
 		}
 	case StatePaused:
 		centered("PAUSED", sh/2-120, 56, rl.White)
@@ -2091,6 +2101,79 @@ func (g *Game) netTestStep(role string, frame int) bool {
 		return true
 	}
 	return false
+}
+
+// hostFromMenu hosts the saved world (or a new one) on the default port.
+func (g *Game) hostFromMenu() {
+	g.Net = &Net{Name: playerName}
+	if saveExists() && g.load() {
+		g.say("Hosting the saved world", 3)
+	} else {
+		g.Reset()
+	}
+	if err := g.StartHost(defaultPort); err != nil {
+		g.State = StateMenu
+		g.JoinErr = "Cannot host: " + err.Error()
+		g.Net = nil
+		return
+	}
+	g.Net.Name = playerName
+	rl.DisableCursor()
+}
+
+// updateJoin edits the address box and connects on Enter.
+func (g *Game) updateJoin() {
+	for ch := rl.GetCharPressed(); ch > 0; ch = rl.GetCharPressed() {
+		if ch >= 32 && ch < 127 && len(g.JoinText) < 60 {
+			g.JoinText += string(rune(ch))
+		}
+	}
+	if (rl.IsKeyPressed(rl.KeyBackspace) || rl.IsKeyPressedRepeat(rl.KeyBackspace)) && len(g.JoinText) > 0 {
+		g.JoinText = g.JoinText[:len(g.JoinText)-1]
+	}
+	if rl.IsKeyPressed(rl.KeyV) && (rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyLeftSuper)) {
+		g.JoinText += rl.GetClipboardText()
+	}
+	if rl.IsKeyPressed(rl.KeyEscape) {
+		g.State = StateMenu
+		return
+	}
+	if rl.IsKeyPressed(rl.KeyEnter) && g.JoinText != "" {
+		addr := g.JoinText
+		if !strings.Contains(addr, ":") {
+			addr += defaultPort
+		}
+		g.JoinErr = "Connecting to " + addr + " ..."
+		if err := g.Connect(addr, playerName); err != nil {
+			g.JoinErr = "Could not join: " + err.Error()
+			g.State = StateJoin
+			return
+		}
+		settings.LastJoin = g.JoinText
+		settings.save()
+		g.JoinErr = ""
+		rl.DisableCursor()
+	}
+}
+
+func (g *Game) drawJoin() {
+	sw, sh := int32(rl.GetScreenWidth()), int32(rl.GetScreenHeight())
+	rl.DrawRectangle(0, 0, sw, sh, rl.NewColor(0, 0, 0, 170))
+	centered("JOIN A WORLD", sh/2-120, 48, rl.Gold)
+	centered("Type the host's address (port 7777 is assumed), then press ENTER", sh/2-50, 20, rl.LightGray)
+	w := int32(520)
+	x := sw/2 - w/2
+	rl.DrawRectangle(x, sh/2-10, w, 44, rl.NewColor(30, 30, 36, 255))
+	rl.DrawRectangleLines(x, sh/2-10, w, 44, rl.White)
+	caret := ""
+	if int(rl.GetTime()*2)%2 == 0 {
+		caret = "_"
+	}
+	rl.DrawText(g.JoinText+caret, x+12, sh/2, 26, rl.White)
+	if g.JoinErr != "" {
+		centered(g.JoinErr, sh/2+60, 20, rl.Orange)
+	}
+	centered("ESC back     CTRL+V paste", sh/2+110, 18, rl.LightGray)
 }
 
 // scriptedShots drives the screenshot session; returns true when finished.
@@ -2194,6 +2277,7 @@ func main() {
 	if *name == "" {
 		*name = fmt.Sprintf("Player%d", rand.Intn(900)+100)
 	}
+	playerName = *name
 
 	rl.SetConfigFlags(rl.FlagVsyncHint | rl.FlagWindowResizable)
 	rl.InitWindow(1280, 720, "Blockworld")
@@ -2306,7 +2390,17 @@ func main() {
 				} else {
 					g.State = StateMenu
 				}
+			} else if rl.IsKeyPressed(rl.KeyH) {
+				g.hostFromMenu()
+			} else if rl.IsKeyPressed(rl.KeyJ) {
+				g.State = StateJoin
+				g.JoinErr = ""
+				if g.JoinText == "" {
+					g.JoinText = settings.LastJoin
+				}
 			}
+		case StateJoin:
+			g.updateJoin()
 		case StatePlaying:
 			if rl.IsKeyPressed(rl.KeyF11) {
 				toggleFullscreen()
@@ -2376,6 +2470,8 @@ func main() {
 			g.drawCrafting()
 		case StateMenu:
 			g.drawOverlay()
+		case StateJoin:
+			g.drawJoin()
 		default:
 			g.drawHUD()
 			g.drawOverlay()

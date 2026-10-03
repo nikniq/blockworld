@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -251,6 +252,25 @@ func decompressWorld(data []byte) ([]Block, error) {
 	return blocks, nil
 }
 
+// lanIP returns this machine's private IPv4 address for others to join, if any.
+func lanIP() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	for _, a := range addrs {
+		if ipn, ok := a.(*net.IPNet); ok {
+			ip := ipn.IP.To4()
+			if ip != nil && !ip.IsLoopback() && ip.IsPrivate() {
+				return ip.String()
+			}
+		}
+	}
+	return ""
+}
+
+const defaultPort = ":7777"
+
 // ---------- host ----------
 
 // StartHost opens the listener; the main loop calls HostTick each frame.
@@ -268,7 +288,10 @@ func (g *Game) StartHost(addr string) error {
 		}{x, y, z, b}}, 0)
 	}
 	go n.acceptLoop(g)
-	n.Status = "Hosting on " + n.Addr
+	n.Status = "Hosting on port " + addr[strings.LastIndex(addr, ":")+1:]
+	if ip := lanIP(); ip != "" {
+		n.Status += "   others join: " + ip + addr[strings.LastIndex(addr, ":"):]
+	}
 	return nil
 }
 
