@@ -242,8 +242,10 @@ func TestLighting(t *testing.T) {
 // A torch is aimable but not solid: entities walk through it and bullets fly past.
 func TestTorchRay(t *testing.T) {
 	w := NewWorld()
-	for y := 18; y < 24; y++ {
-		w.Set(5, y, 5, Air)
+	for z := 0; z <= 5; z++ {
+		for y := 18; y < 24; y++ {
+			w.Set(5, y, z, Air)
+		}
 	}
 	w.Set(5, 20, 5, Torch)
 	o, d := rl.NewVector3(5.5, 20.5, 0.5), rl.NewVector3(0, 0, 1)

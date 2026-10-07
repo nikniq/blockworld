@@ -36,6 +36,13 @@ type Primed struct {
 	Fuse float32
 }
 
+// ChatLine is one line of in-game chat or a system notice.
+type ChatLine struct {
+	From string
+	Text string
+	T    float32 // seconds since it arrived
+}
+
 type Tracer struct {
 	Start, End rl.Vector3
 	Life       float32
@@ -73,7 +80,14 @@ type Game struct {
 	Net            *Net
 	JoinText       string
 	JoinErr        string
-	JoinField      int // 0 address, 1 name
+	JoinField      int  // 0 address, 1 name
+	Headless       bool // dedicated server: no window, no local player
+	lastLogged     string
+	Chat           []ChatLine
+	ChatText       string
+	Chatting       bool
+	PlayerList     []PlayerState // last known players (for the P overlay)
+	AutoSaveT      float32
 	netTestCell    [3]int
 	netTestWas     Block
 	Remotes        map[uint32]*RemotePlayer
@@ -215,8 +229,10 @@ func (g *Game) dawn() {
 }
 
 func (g *Game) spawnHostiles(n int) {
+	ts := g.targets()
 	for i := 0; i < n; i++ {
-		p, ok := g.World.RandomDarkPoint(g.Player.Pos, 16)
+		from := ts[rand.Intn(len(ts))].Pos
+		p, ok := g.World.RandomDarkPoint(from, 16)
 		if !ok {
 			continue // the whole surface is lit: nothing rises
 		}
@@ -1068,7 +1084,6 @@ func (g *Game) tickSpawners(dt float32) {
 		return
 	}
 	g.SpawnerCD = 1.5
-	p := g.Player
 	w := g.World
 	for i, b := range w.Blocks {
 		if b != Spawner {
@@ -1078,7 +1093,7 @@ func (g *Game) tickSpawners(dt float32) {
 		z := (i/worldW)%worldD + originZ
 		y := i / (worldW * worldD)
 		c := rl.NewVector3(float32(x)+0.5, float32(y), float32(z)+0.5)
-		if rl.Vector3Distance(c, p.Pos) > 14 || rand.Float32() > 0.3 {
+		if rl.Vector3Distance(c, g.nearestTarget(c).Pos) > 14 || rand.Float32() > 0.3 {
 			continue
 		}
 		near := 0
@@ -1127,6 +1142,18 @@ func article(s string) string {
 
 func (g *Game) update(dt float32) {
 	p := g.Player
+	for i := range g.Chat {
+		g.Chat[i].T += dt
+	}
+	g.AutoSaveT += dt
+	if g.AutoSaveT > 120 && !g.isClient() && !g.Headless {
+		g.AutoSaveT = 0
+		g.save()
+	}
+	if g.Headless {
+		g.headlessUpdate(dt)
+		return
+	}
 	wasReloading := p.Reloading > 0
 	wasWater := p.InWater
 	p.Update(dt, g.World)
@@ -1147,6 +1174,10 @@ func (g *Game) update(dt float32) {
 	}
 	if rl.IsKeyPressed(rl.KeyM) {
 		g.ShowMap = !g.ShowMap
+	}
+	if rl.IsKeyPressed(rl.KeyT) && g.Net != nil {
+		g.Chatting = true
+		g.ChatText = ""
 	}
 	g.RainCD -= dt
 	if g.Sky.Rain > 0.1 && g.RainCD <= 0 && g.World.SkyExposed(p.Eye()) {
@@ -1182,6 +1213,21 @@ func (g *Game) update(dt float32) {
 		g.clientUpdate(dt)
 		return
 	}
+	g.worldUpdate(dt)
+	g.tickEffects(dt)
+	g.checkDeath()
+}
+
+// headlessUpdate is the dedicated server's frame: world simulation only.
+func (g *Game) headlessUpdate(dt float32) {
+	g.worldUpdate(dt)
+	g.MsgT = max(0, g.MsgT-dt)
+}
+
+// worldUpdate advances everything the host owns: clock, hostiles, animals,
+// drops, TNT, arrows, lava, saplings and spawners.
+func (g *Game) worldUpdate(dt float32) {
+	p := g.Player
 	g.assignIDs()
 
 	// Time of day.
@@ -1278,9 +1324,6 @@ func (g *Game) update(dt float32) {
 	g.growSaplings(dt)
 	g.tickSpawners(dt)
 	g.updateSleep(dt)
-
-	g.tickEffects(dt)
-	g.checkDeath()
 }
 
 // clientUpdate is the per-frame work a joined player does locally: the host
@@ -1806,6 +1849,12 @@ func (g *Game) drawHUD() {
 		drawArmorIcon(float32(hx+10*26+58), float32(hy+10), 22, p.ArmorTier)
 		rl.DrawText(fmt.Sprintf("%d%%", int(armorReduce[p.ArmorTier]*100)), hx+10*26+76, hy, 16, rl.LightGray)
 	}
+	if g.Net != nil || len(g.Chat) > 0 {
+		g.drawChat(sw, sh)
+	}
+	if g.Net != nil && rl.IsKeyDown(rl.KeyP) {
+		g.drawPlayerList(sw, sh)
+	}
 	if g.ShowMap {
 		g.drawFullMap(sw, sh)
 	}
@@ -1864,6 +1913,7 @@ func (g *Game) drawHelp(sw, sh int32) {
 		"E crafting   R reload   F5 third person   F11 fullscreen   ESC pause and settings",
 		"Torches keep hostiles from rising nearby. Undead burn at sunrise. Creepers explode.",
 		"Beds set your spawn point and skip the night. Dying drops your items where you fell.",
+		"Online: T chat   P player list",
 		"H closes this help",
 	}
 	w := int32(760)
@@ -2104,6 +2154,112 @@ func (g *Game) netTestStep(role string, frame int) bool {
 	return false
 }
 
+// updateChat edits the chat line; Enter sends it, Esc cancels.
+func (g *Game) updateChat() {
+	for ch := rl.GetCharPressed(); ch > 0; ch = rl.GetCharPressed() {
+		if ch >= 32 && ch < 127 && len(g.ChatText) < 80 {
+			g.ChatText += string(rune(ch))
+		}
+	}
+	if (rl.IsKeyPressed(rl.KeyBackspace) || rl.IsKeyPressedRepeat(rl.KeyBackspace)) && len(g.ChatText) > 0 {
+		g.ChatText = g.ChatText[:len(g.ChatText)-1]
+	}
+	if rl.IsKeyPressed(rl.KeyEscape) {
+		g.Chatting = false
+	}
+	if rl.IsKeyPressed(rl.KeyEnter) {
+		g.Chatting = false
+		text := strings.TrimSpace(g.ChatText)
+		if text != "" {
+			g.sendChat(text)
+		}
+	}
+}
+
+// addChat appends a line to the on-screen log.
+func (g *Game) addChat(from, text string) {
+	g.Chat = append(g.Chat, ChatLine{From: from, Text: text})
+	if len(g.Chat) > 8 {
+		g.Chat = g.Chat[len(g.Chat)-8:]
+	}
+	if g.Headless {
+		if from == "" {
+			fmt.Println("blockworld server: *", text)
+		} else {
+			fmt.Printf("blockworld server: <%s> %s\n", from, text)
+		}
+	}
+}
+
+// sendChat shows the line locally and delivers it to everyone else.
+func (g *Game) sendChat(text string) {
+	name := playerName
+	if g.Net != nil {
+		name = g.Net.Name
+	}
+	g.addChat(name, text)
+	if g.isClient() {
+		g.sendToHost(&Msg{Chat: &struct{ From, Text string }{name, text}})
+	} else if g.isHost() {
+		g.Net.broadcast(&Msg{Chat: &struct{ From, Text string }{name, text}}, 0)
+	}
+}
+
+func (g *Game) drawChat(sw, sh int32) {
+	y := sh - 110
+	for i := len(g.Chat) - 1; i >= 0; i-- {
+		l := g.Chat[i]
+		if l.T > 14 && !g.Chatting {
+			continue
+		}
+		a := float32(1)
+		if !g.Chatting && l.T > 10 {
+			a = 1 - (l.T-10)/4
+		}
+		line := l.Text
+		col := rl.LightGray
+		if l.From != "" {
+			line = "<" + l.From + "> " + l.Text
+			col = rl.White
+		}
+		rl.DrawRectangle(16, y-2, rl.MeasureText(line, 17)+12, 21, rl.Fade(rl.Black, 0.45*a))
+		rl.DrawText(line, 22, y, 17, rl.Fade(col, a))
+		y -= 24
+	}
+	if g.Chatting {
+		rl.DrawRectangle(16, sh-84, 600, 26, rl.NewColor(0, 0, 0, 200))
+		caret := ""
+		if int(rl.GetTime()*2)%2 == 0 {
+			caret = "_"
+		}
+		rl.DrawText("> "+g.ChatText+caret, 22, sh-80, 18, rl.White)
+	}
+}
+
+// drawPlayerList shows everyone online with their health.
+func (g *Game) drawPlayerList(sw, sh int32) {
+	list := g.PlayerList
+	if !g.isClient() {
+		list = []PlayerState{g.localState()}
+		for _, r := range g.Remotes {
+			list = append(list, r.PlayerState)
+		}
+	}
+	w := int32(320)
+	x := sw/2 - w/2
+	y := int32(170)
+	rl.DrawRectangle(x, y, w, int32(len(list))*26+40, rl.NewColor(0, 0, 0, 190))
+	rl.DrawText("PLAYERS", x+12, y+8, 20, rl.Gold)
+	for i, ps := range list {
+		name := ps.Name
+		if g.Net != nil && ps.ID == g.Net.MyID {
+			name += "  (you)"
+		}
+		rl.DrawText(name, x+12, y+36+int32(i)*26, 18, rl.White)
+		rl.DrawText(fmt.Sprintf("%d hp", ps.HP), x+w-70, y+36+int32(i)*26, 18, rl.Lime)
+	}
+}
+
 // hostFromMenu hosts the saved world (or a new one) on the default port.
 func (g *Game) hostFromMenu() {
 	g.Net = &Net{Name: playerName}
@@ -2308,7 +2464,20 @@ func main() {
 	hostAddr := flag.String("host", "", "host a world for others on this address, e.g. :7777")
 	joinAddr := flag.String("join", "", "join a hosted world, e.g. 192.168.1.10:7777")
 	name := flag.String("name", "", "your player name in multiplayer")
+	serveAddr := flag.String("serve", "", "run a dedicated server without a window on this address, e.g. :7777")
 	flag.Parse()
+	if *serveAddr != "" {
+		n := *name
+		if n == "" {
+			n = "Server"
+		}
+		secs := 0
+		if os.Getenv("BLOCKWORLD_NETTEST") == "server" {
+			secs = 25
+		}
+		runServer(*serveAddr, n, secs)
+		return
+	}
 	playerName = *name
 
 	rl.SetConfigFlags(rl.FlagVsyncHint | rl.FlagWindowResizable)
@@ -2440,6 +2609,13 @@ func main() {
 		case StateJoin:
 			g.updateJoin()
 		case StatePlaying:
+			if g.Chatting {
+				g.updateChat()
+				if g.isHost() || g.isClient() {
+					g.update(0) // keep the world and network flowing without player input
+				}
+				break
+			}
 			if rl.IsKeyPressed(rl.KeyF11) {
 				toggleFullscreen()
 				settings.save()

@@ -72,6 +72,8 @@ block textures and sound effects are generated at startup.
 | F5 | Third-person view |
 | H | Controls help |
 | M | Full map |
+| T (online) | Chat |
+| P (online, hold) | Player list |
 | S (paused) | Save world |
 | C (menu) | Continue saved world |
 | Q (paused or dead) | Back to menu |
@@ -94,6 +96,15 @@ window shows "You are ..." while online. The same works from the command line:
 # Join from another machine on the same network:
 ./blockworld -join 192.168.1.10:7777 -name Bob
 ```
+
+A **dedicated server** runs without a window, for example on a Linux box or a spare laptop:
+
+```sh
+./blockworld -serve :7777
+```
+
+It loads the saved world (or generates one), auto-saves every two minutes, prints joins, chat and
+day/night events, and saves on Ctrl+C. While online, **T** opens chat and holding **P** lists players.
 
 Open port 7777 on the host's firewall for LAN play. Over the internet, forward the port on the
 host's router or use a tunnel such as Tailscale. Only the host can save and sleep through the night;

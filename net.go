@@ -169,6 +169,7 @@ type Msg struct {
 	Fx    *Fx
 	Leave *struct{ ID uint32 }
 	Text  *struct{ Text string }
+	Chat  *struct{ From, Text string }
 }
 
 // peer is one connection with a locked encoder.
@@ -399,7 +400,9 @@ func (g *Game) localState() PlayerState {
 
 func (g *Game) makeSnapshot() *Snapshot {
 	s := &Snapshot{SkyT: g.Sky.T, Day: g.Sky.Day, Night: g.Night, Rain: g.Sky.Rain, Raining: g.Sky.Raining, Hostiles: g.aliveEnemies()}
-	s.Players = append(s.Players, g.localState())
+	if !g.Headless {
+		s.Players = append(s.Players, g.localState())
+	}
 	for _, r := range g.Remotes {
 		s.Players = append(s.Players, r.PlayerState)
 	}
@@ -434,11 +437,13 @@ func (g *Game) hostHandle(from uint32, m *Msg) {
 			Diffic int
 		}{from, compressWorld(w.Blocks), g.Sky.T, g.Sky.Day, g.Night, g.Spawn, settings.Difficulty}})
 		g.say(m.Hello.Name+" joined", 2.5)
-		n.broadcast(&Msg{Fx: &Fx{Kind: FxMessage, Text: m.Hello.Name + " joined"}}, from)
+		g.addChat("", m.Hello.Name+" joined")
+		n.broadcast(&Msg{Chat: &struct{ From, Text string }{"", m.Hello.Name + " joined"}}, from)
 	case m.Leave != nil:
 		if r, ok := g.Remotes[from]; ok {
 			g.say(r.Name+" left", 2.5)
-			n.broadcast(&Msg{Fx: &Fx{Kind: FxMessage, Text: r.Name + " left"}}, from)
+			g.addChat("", r.Name+" left")
+			n.broadcast(&Msg{Chat: &struct{ From, Text string }{"", r.Name + " left"}}, from)
 		}
 		delete(g.Remotes, from)
 	case m.State != nil:
@@ -521,6 +526,13 @@ func (g *Game) hostHandle(from uint32, m *Msg) {
 	case m.Text != nil:
 		g.say(m.Text.Text, 3)
 		n.broadcast(&Msg{Fx: &Fx{Kind: FxMessage, Text: m.Text.Text}}, from)
+	case m.Chat != nil:
+		name := m.Chat.From
+		if r, ok := g.Remotes[from]; ok {
+			name = r.Name
+		}
+		g.addChat(name, m.Chat.Text)
+		n.broadcast(&Msg{Chat: &struct{ From, Text string }{name, m.Chat.Text}}, from)
 	}
 }
 
@@ -641,6 +653,8 @@ func (g *Game) clientHandle(m *Msg) {
 	case m.Snapshot != nil:
 		g.Net.Snaps++
 		g.applySnapshot(m.Snapshot)
+	case m.Chat != nil:
+		g.addChat(m.Chat.From, m.Chat.Text)
 	case m.Give != nil:
 		if m.Give.Ammo > 0 {
 			p.Reserve += m.Give.Ammo
@@ -691,6 +705,7 @@ func (g *Game) applySnapshot(s *Snapshot) {
 	g.Sky.T, g.Sky.Day, g.Night = s.SkyT, s.Day, s.Night
 	g.Sky.Rain, g.Sky.Raining = s.Rain, s.Raining
 	g.RemoteHostiles = s.Hostiles
+	g.PlayerList = s.Players
 	seen := map[uint32]bool{}
 	for _, ps := range s.Players {
 		if ps.ID == g.Net.MyID {
@@ -777,7 +792,7 @@ func (g *Game) localTarget() Target {
 // targets lists everyone hostiles may chase.
 func (g *Game) targets() []Target {
 	ts := []Target{}
-	if g.Player.HP > 0 {
+	if g.Player.HP > 0 && !g.Headless {
 		ts = append(ts, g.localTarget())
 	}
 	for _, r := range g.Remotes {
@@ -808,6 +823,9 @@ func (g *Game) isHost() bool   { return g.Net != nil && g.Net.Role == RoleHost }
 // hurtTarget applies damage to whichever player an enemy hit.
 func (g *Game) hurtTarget(id uint32, amount int, cause string, armored bool) {
 	if id == 0 {
+		if g.Headless {
+			return
+		}
 		g.Player.Hurt(amount, cause, armored)
 		g.Audio.Play(g.Audio.Hurt, 0.9)
 		return
