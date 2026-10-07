@@ -617,3 +617,36 @@ func TestFarmingAndBow(t *testing.T) {
 		t.Fatal("bow should appear on the hotbar")
 	}
 }
+
+// A dinosaur roams at world start, ignores the player until hurt, then charges and bites.
+func TestDinosaur(t *testing.T) {
+	rand.Seed(14)
+	g := &Game{Audio: &Audio{}, CraftHover: -1}
+	g.Reset()
+	if g.dinosaurs() != 1 {
+		t.Fatalf("dinosaurs at start: %d", g.dinosaurs())
+	}
+	var d *Animal
+	for _, a := range g.Animals {
+		if a.Kind == AnimalDino {
+			d = a
+		}
+	}
+	p := g.Player
+	// Put it next to the player on flat ground and provoke it.
+	d.Pos = rl.NewVector3(p.Pos.X+1.5, p.Pos.Y, p.Pos.Z)
+	if bite := d.Update(0.1, g.World, g.localTarget()); bite != 0 {
+		t.Fatal("a calm dinosaur does not bite")
+	}
+	d.Hit(1)
+	bitten := 0
+	for i := 0; i < 40; i++ {
+		bitten += d.Update(0.1, g.World, g.localTarget())
+	}
+	if bitten < 18 {
+		t.Fatalf("provoked dinosaur should bite: %d", bitten)
+	}
+	if d.Flee < 5 {
+		t.Fatal("dinosaur should stay angry for a while")
+	}
+}

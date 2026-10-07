@@ -34,6 +34,7 @@ type Audio struct {
 	Eat      rl.Sound
 	Groan    rl.Sound
 	Music    rl.Sound // generated ambient loop
+	Roar     rl.Sound
 	Rain     rl.Sound
 	Rattle   rl.Sound
 	Steps    [4]rl.Sound // grass, stone, sand, wood
@@ -120,6 +121,11 @@ func NewAudio() *Audio {
 	a.Rain = a.synth(1.0, func(t float32) float32 {
 		env := float32(math.Sin(float64(t * math.Pi)))
 		return noise() * 0.25 * (0.4 + 0.6*env)
+	})
+	a.Roar = a.synth(1.4, func(t float32) float32 {
+		f := 70 + 40*float32(math.Sin(float64(t*4))) - 20*t
+		env := float32(math.Sin(float64(t / 1.4 * math.Pi)))
+		return (saw(f, t)*0.5 + saw(f*1.5, t)*0.3 + noise()*0.25) * env * 0.9
 	})
 	a.Music = a.synthMusic()
 	a.Groan = a.synth(0.9, func(t float32) float32 {

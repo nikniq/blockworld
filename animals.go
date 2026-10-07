@@ -15,6 +15,7 @@ const (
 	AnimalPig AnimalKind = iota
 	AnimalCow
 	AnimalSheep
+	AnimalDino
 	numAnimalKinds
 )
 
@@ -28,29 +29,34 @@ type animalSpec struct {
 	Head   rl.Color
 	Legs   rl.Color
 	Meat   int
+	Damage int // bite damage when provoked (0: harmless)
 }
 
 var animalKinds = [...]animalSpec{
-	AnimalPig:   {"Pig", 4, 1.6, 0.35, 0.9, rl.NewColor(235, 160, 170, 255), rl.NewColor(240, 170, 180, 255), rl.NewColor(220, 140, 150, 255), 2},
-	AnimalCow:   {"Cow", 6, 1.4, 0.4, 1.3, rl.NewColor(80, 55, 40, 255), rl.NewColor(90, 65, 50, 255), rl.NewColor(60, 40, 30, 255), 3},
-	AnimalSheep: {"Sheep", 4, 1.5, 0.4, 1.1, rl.NewColor(230, 230, 225, 255), rl.NewColor(70, 60, 55, 255), rl.NewColor(60, 55, 50, 255), 1},
+	AnimalPig:   {"Pig", 4, 1.6, 0.35, 0.9, rl.NewColor(235, 160, 170, 255), rl.NewColor(240, 170, 180, 255), rl.NewColor(220, 140, 150, 255), 2, 0},
+	AnimalCow:   {"Cow", 6, 1.4, 0.4, 1.3, rl.NewColor(80, 55, 40, 255), rl.NewColor(90, 65, 50, 255), rl.NewColor(60, 40, 30, 255), 3, 0},
+	AnimalSheep: {"Sheep", 4, 1.5, 0.4, 1.1, rl.NewColor(230, 230, 225, 255), rl.NewColor(70, 60, 55, 255), rl.NewColor(60, 55, 50, 255), 1, 0},
+	AnimalDino:  {"Dinosaur", 45, 2.2, 0.7, 2.8, rl.NewColor(70, 120, 60, 255), rl.NewColor(80, 130, 65, 255), rl.NewColor(60, 100, 50, 255), 8, 18},
 }
 
 type Animal struct {
-	ID      uint32
-	Kind    AnimalKind
-	Spec    *animalSpec
-	Pos     rl.Vector3
-	Heading rl.Vector3
-	VelY    float32
-	HP      int
-	WanderT float32
-	Walking bool
-	Flee    float32 // seconds left running from the player
-	Phase   float32
-	Alive   bool
-	DeathT  float32
-	Lum     float32
+	ID       uint32
+	Kind     AnimalKind
+	Spec     *animalSpec
+	Pos      rl.Vector3
+	Heading  rl.Vector3
+	VelY     float32
+	HP       int
+	WanderT  float32
+	Walking  bool
+	Flee     float32 // seconds left running from the player (or charging, for a dinosaur)
+	BiteCD   float32
+	RoarCD   float32
+	StepFlag int
+	Phase    float32
+	Alive    bool
+	DeathT   float32
+	Lum      float32
 }
 
 func NewAnimal(pos rl.Vector3, kind AnimalKind) *Animal {
@@ -65,12 +71,16 @@ func (a *Animal) BB() rl.BoundingBox {
 	return rl.NewBoundingBox(rl.NewVector3(a.Pos.X-r, a.Pos.Y, a.Pos.Z-r), rl.NewVector3(a.Pos.X+r, a.Pos.Y+a.Spec.Height, a.Pos.Z+r))
 }
 
-func (a *Animal) Update(dt float32, w *World, p Target) {
+// Update moves the animal; returns bite damage dealt to the target this frame.
+func (a *Animal) Update(dt float32, w *World, p Target) int {
 	if !a.Alive {
 		a.DeathT += dt
-		return
+		return 0
 	}
 	a.Flee = max(0, a.Flee-dt)
+	a.BiteCD = max(0, a.BiteCD-dt)
+	a.RoarCD = max(0, a.RoarCD-dt)
+	bite := 0
 	a.WanderT -= dt
 	if a.WanderT <= 0 {
 		a.WanderT = 1 + rand.Float32()*4
@@ -79,7 +89,23 @@ func (a *Animal) Update(dt float32, w *World, p Target) {
 		a.Heading = rl.NewVector3(float32(math.Sin(ang)), 0, float32(math.Cos(ang)))
 	}
 	speed := float32(0)
-	if a.Flee > 0 {
+	if a.Flee > 0 && a.Spec.Damage > 0 {
+		// A provoked dinosaur charges and bites instead of fleeing.
+		to := rl.Vector3Subtract(p.Pos, a.Pos)
+		to.Y = 0
+		dist := rl.Vector3Length(to)
+		if dist > 0.01 {
+			a.Heading = rl.Vector3Scale(to, 1/dist)
+		}
+		speed = a.Spec.Speed * 1.9
+		if dist < a.Spec.Radius+1.4 {
+			speed = 0
+			if a.BiteCD == 0 && math.Abs(float64(p.Pos.Y-a.Pos.Y)) < 3 {
+				a.BiteCD = 1.3
+				bite = a.Spec.Damage
+			}
+		}
+	} else if a.Flee > 0 {
 		// Run away from the player.
 		away := rl.Vector3Subtract(a.Pos, p.Pos)
 		away.Y = 0
@@ -117,6 +143,7 @@ func (a *Animal) Update(dt float32, w *World, p Target) {
 		a.Heading = rl.Vector3Scale(a.Heading, -1)
 		a.Walking = true
 	}
+	return bite
 }
 
 // Hit damages the animal and sends it running; returns true if it died.
@@ -126,6 +153,9 @@ func (a *Animal) Hit(dmg int) bool {
 	}
 	a.HP -= dmg
 	a.Flee = 5
+	if a.Spec.Damage > 0 {
+		a.Flee = 14 // dinosaurs hold a grudge
+	}
 	if a.HP <= 0 {
 		a.Alive = false
 		return true
@@ -141,6 +171,31 @@ func (a *Animal) Draw(w *World) {
 		kind, scale = SkinCow, 0.93
 	case AnimalSheep:
 		kind, scale = SkinSheep, 0.95
+	case AnimalDino:
+		pose := Pose{Pos: a.Pos, Yaw: yawOf(a.Heading), Phase: a.Phase, Amp: 0, Scale: 1, Lum: a.Lum, Alpha: 1}
+		if a.Walking || a.Flee > 0 {
+			pose.Amp = 1
+		}
+		if !a.Alive {
+			pose.Death = clamp(a.DeathT*2.5, 0, 1)
+			pose.Alpha = 1 - pose.Death
+			pose.Amp = 0
+			if pose.Death >= 1 {
+				return
+			}
+		}
+		if a.Flee > 13.7 {
+			pose.Flash = (a.Flee - 13.7) / 0.3
+		}
+		pose.Swing = clamp(a.BiteCD-0.9, 0, 0.4) / 0.4 // jaw snap just after a bite
+		skins.DrawDino(w, &pose)
+		if a.Alive && a.HP < a.Spec.HP {
+			top := a.Pos.Y + a.Spec.Height + 0.2
+			frac := float32(a.HP) / float32(a.Spec.HP)
+			rl.DrawCubeV(rl.NewVector3(a.Pos.X, top, a.Pos.Z), rl.NewVector3(2.0, 0.1, 0.1), rl.NewColor(0, 0, 0, 180))
+			rl.DrawCubeV(rl.NewVector3(a.Pos.X-(1-frac)*1.0, top, a.Pos.Z), rl.NewVector3(frac*2, 0.12, 0.12), rl.Lime)
+		}
+		return
 	}
 	amp := float32(0)
 	if a.Walking || a.Flee > 0 {
@@ -173,15 +228,59 @@ func (g *Game) spawnAnimals(n int) {
 		if g.World.Get(floorI(p.X), floorI(p.Y)-1, floorI(p.Z)) != Grass {
 			continue
 		}
-		g.Animals = append(g.Animals, NewAnimal(p, AnimalKind(rand.Intn(int(numAnimalKinds)))))
+		g.Animals = append(g.Animals, NewAnimal(p, AnimalKind(rand.Intn(int(AnimalDino)))))
 	}
+}
+
+// spawnDinosaur puts one roaming dinosaur far from the player on open ground.
+func (g *Game) spawnDinosaur() {
+	for try := 0; try < 20; try++ {
+		p := g.World.RandomFreePoint(g.Player.Pos, 25)
+		if g.World.Get(floorI(p.X), floorI(p.Y)-1, floorI(p.Z)) == Grass && g.World.PointFree(p, 0.8) {
+			d := NewAnimal(p, AnimalDino)
+			d.Walking = true
+			g.Animals = append(g.Animals, d)
+			return
+		}
+	}
+}
+
+func (g *Game) dinosaurs() int {
+	n := 0
+	for _, a := range g.Animals {
+		if a.Alive && a.Kind == AnimalDino {
+			n++
+		}
+	}
+	return n
 }
 
 func (g *Game) updateAnimals(dt float32) {
 	alive := 0
 	keep := g.Animals[:0]
 	for _, a := range g.Animals {
-		a.Update(dt, g.World, g.nearestTarget(a.Pos))
+		t := g.nearestTarget(a.Pos)
+		if bite := a.Update(dt, g.World, t); bite > 0 {
+			g.hurtTargetFrom(t.ID, int(float32(bite)*damageScale()+0.5), "was eaten by a Dinosaur", true, a.Pos, 7)
+			g.Audio.Play(g.Audio.Hit, 0.8)
+		}
+		if a.Alive && a.Kind == AnimalDino {
+			// Thudding steps and the occasional roar, by distance.
+			d := rl.Vector3Distance(a.Pos, g.Player.Pos)
+			if a.RoarCD == 0 {
+				a.RoarCD = 9 + rand.Float32()*12
+				if vol := 0.9 * clamp(1-d/45, 0, 1); vol > 0.05 {
+					g.Audio.Play(g.Audio.Roar, vol)
+				}
+			}
+			if (a.Walking || a.Flee > 0) && int(a.Phase*2)%4 == 0 && d < 30 && a.StepFlag != int(a.Phase*2) {
+				a.StepFlag = int(a.Phase * 2)
+				g.Audio.Play(g.Audio.Steps[1], 0.5*clamp(1-d/30, 0, 1))
+				if d < 12 {
+					g.Shake = max(g.Shake, 0.12)
+				}
+			}
+		}
 		if a.Alive {
 			alive++
 		}
@@ -197,6 +296,9 @@ func (g *Game) updateAnimals(dt float32) {
 		if alive < 10 && !g.Sky.IsNight() {
 			g.spawnAnimals(2)
 		}
+		if g.dinosaurs() == 0 && rand.Float32() < 0.35 {
+			g.spawnDinosaur()
+		}
 	}
 }
 
@@ -208,6 +310,12 @@ func (g *Game) killAnimal(a *Animal) {
 		g.spawnDrop(c, Meat, 0)
 	}
 	switch a.Kind {
+	case AnimalDino:
+		g.Score += 800
+		g.spawnDrop(c, Leather, 0)
+		g.spawnDrop(c, Leather, 0)
+		g.spawnDrop(c, Leather, 0)
+		g.announce("DINOSAUR SLAIN  +800", 3)
 	case AnimalSheep:
 		g.spawnDrop(c, Wool, 0)
 		g.spawnDrop(c, Wool, 0)

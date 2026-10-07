@@ -25,6 +25,7 @@ const (
 	SkinPig
 	SkinCow
 	SkinSheep
+	SkinDino
 	numSkins
 )
 
@@ -248,6 +249,32 @@ func paintSkin(kind SkinKind, part, face, x, y int) rl.Color {
 			}
 		}
 		return shade(brown)
+	case SkinDino:
+		green := col(70, 120, 60)
+		if (x+y)%7 < 2 && face != 1 {
+			green = col(50, 90, 45) // stripes
+		}
+		if face == 1 {
+			green = col(150, 160, 110) // pale belly
+		}
+		switch part {
+		case PartHead:
+			if face == 4 {
+				if y >= 10 && y <= 11 && x%2 == 0 {
+					return rl.NewColor(240, 240, 230, 255) // teeth
+				}
+				if y >= 12 {
+					return col(60, 30, 30) // mouth
+				}
+				return eyes(green, col(240, 200, 40), false)
+			}
+			if (face == 2 || face == 3) && y >= 11 && x < 9 {
+				return col(60, 30, 30) // jaw line
+			}
+		case PartExtra:
+			return shade(mul(green, 0.85)) // tail
+		}
+		return shade(green)
 	case SkinSheep:
 		wool := col(232, 232, 226)
 		if part == PartHead {
@@ -528,6 +555,36 @@ func (s *Skins) DrawCrack(w *World, x, y, z int, stage int) {
 	mm := s.mat.GetMap(rl.MapDiffuse)
 	mm.Color = lightColor(w, rl.NewVector3(float32(x)+0.5, float32(y)+1.5, float32(z)+0.5), 1)
 	rl.DrawMesh(s.box(skinCracks, stage).mesh, s.mat, m)
+}
+
+// DrawDino draws a two-legged dinosaur: upright body, long tail, big head, tiny arms.
+func (s *Skins) DrawDino(w *World, p *Pose) {
+	s.init(w)
+	model := modelMatrix(p)
+	c := lightColor(w, rl.Vector3Add(p.Pos, rl.NewVector3(0, 1.5, 0)), p.Alpha)
+	sw := swingAt(p.Phase, p.Amp)
+	bob := float32(math.Abs(math.Sin(float64(p.Phase)))) * 0.08 * p.Amp
+	const legH = 1.3
+	// Legs: thick, pivoting at the hips.
+	s.drawPart(SkinDino, PartLegL, rl.NewVector3(0.4, legH, 0.45), rl.NewVector3(0.42, legH, -0.1), 0.5, sw, 0, 0, model, c)
+	s.drawPart(SkinDino, PartLegR, rl.NewVector3(0.4, legH, 0.45), rl.NewVector3(-0.42, legH, -0.1), 0.5, -sw, 0, 0, model, c)
+	// Body leans forward slightly; the tail balances behind.
+	bodyY := legH + 0.1 + bob
+	s.drawPart(SkinDino, PartBody, rl.NewVector3(1.0, 0.9, 1.6), rl.NewVector3(0, bodyY, 0.1), -0.5, 0.12, 0, 0, model, c)
+	wag := float32(math.Sin(float64(p.Phase*0.5))) * 0.2
+	s.drawPart(SkinDino, PartExtra, rl.NewVector3(0.6, 0.55, 1.4), rl.NewVector3(0, bodyY+0.35, -0.7), 0, -0.15, wag, 0, model, c)
+	s.drawPart(SkinDino, PartExtra, rl.NewVector3(0.35, 0.35, 1.3), rl.NewVector3(0, bodyY+0.45, -1.9), 0, -0.25, wag*1.6, 0, model, c)
+	// Neck and head out in front; the jaw drops when biting.
+	s.drawPart(SkinDino, PartBody, rl.NewVector3(0.5, 0.5, 0.7), rl.NewVector3(0, bodyY+0.85, 0.95), 0, -0.5, 0, 0, model, c)
+	jaw := -p.Pitch + p.Swing*0.5
+	s.drawPart(SkinDino, PartHead, rl.NewVector3(0.7, 0.65, 1.1), rl.NewVector3(0, bodyY+1.05, 1.35), 0, jaw, 0, 0, model, c)
+	// Tiny arms.
+	for _, sg := range []float32{-1, 1} {
+		s.drawPart(SkinDino, PartArmL, rl.NewVector3(0.18, 0.5, 0.18), rl.NewVector3(sg*0.5, bodyY+0.3, 0.6), 0.5, -1.2+sw*0.3, 0, 0, model, c)
+	}
+	if p.Flash > 0 {
+		rl.DrawCubeV(rl.Vector3Add(p.Pos, rl.NewVector3(0, 1.6, 0)), rl.NewVector3(1.6, 3.2, 3.6), rl.Fade(rl.White, p.Flash*0.5))
+	}
 }
 
 func yawOf(heading rl.Vector3) float32 {

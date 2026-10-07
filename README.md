@@ -45,6 +45,9 @@ block textures and sound effects are generated at startup.
   Stone needs a pickaxe tier; iron ore needs stone, gold and diamond ore need iron.
 - **Crafting (E)**: logs to planks, torches, TNT, ladders, beds, cobblestone to stone bricks, sand to glass, ore to rifle ammo,
   and stone/iron/diamond swords and pickaxes. Better pickaxes mine faster; better swords hit harder.
+- **A dinosaur** roams every world: a striped, two-legged beast three blocks tall that thuds as it walks
+  and roars across the valley. Leave it alone and it ignores you. Hurt it and it charges and bites for
+  serious damage until it loses interest. Slaying it is worth 800 points, eight meat and leather.
 - **Animals**: pigs, cows and sheep graze on the grass and flee when hurt. They drop raw meat;
   hold it and right click to eat for 30 health.
 - **TNT**: craft it from sand and coal, place it, then shoot it or hit it with the sword. It falls,

@@ -160,6 +160,7 @@ func (g *Game) Reset() {
 	g.State = StatePlaying
 	g.AnimalCD = 25
 	g.spawnAnimals(16)
+	g.spawnDinosaur()
 	g.say("Day 1  -  mine, craft and build before dark  (E = crafting)", 5)
 }
 
@@ -2571,7 +2572,7 @@ func (g *Game) scriptedShots(frame int) bool {
 	case 180:
 		g.Sky.Raining, g.Sky.Rain = true, 1
 		g.ShowHelp = true
-		for i, k := range []AnimalKind{AnimalPig, AnimalCow, AnimalSheep} {
+		for i, k := range []AnimalKind{AnimalPig, AnimalCow, AnimalSheep, AnimalDino} {
 			p := rl.Vector3Add(g.Player.Pos, rl.Vector3Scale(g.Player.FlatForward(), 4+float32(i)*1.5))
 			p.X += float32(i)*2 - 2
 			p.Y = float32(g.World.SurfaceY(floorI(p.X), floorI(p.Z)))
@@ -2582,6 +2583,7 @@ func (g *Game) scriptedShots(frame int) bool {
 	case 210:
 		g.Player.Pitch = -0.15
 		g.ThirdPerson = true
+		g.ShowHelp = false
 		g.Player.Hunger = 13
 		g.ShowHelp = false
 		g.Sky.Raining, g.Sky.Rain = false, 0
