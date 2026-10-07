@@ -234,9 +234,10 @@ func (g *Game) spawnAnimals(n int) {
 
 // spawnDinosaur puts one roaming dinosaur far from the player on open ground.
 func (g *Game) spawnDinosaur() {
-	for try := 0; try < 20; try++ {
+	for try := 0; try < 300; try++ {
 		p := g.World.RandomFreePoint(g.Player.Pos, 25)
-		if g.World.Get(floorI(p.X), floorI(p.Y)-1, floorI(p.Z)) == Grass && g.World.PointFree(p, 0.8) {
+		ground := g.World.Get(floorI(p.X), floorI(p.Y)-1, floorI(p.Z))
+		if (ground == Grass || ground == Sand || ground == Snow || try > 200) && g.World.PointFree(p, 0.8) {
 			d := NewAnimal(p, AnimalDino)
 			d.Walking = true
 			g.Animals = append(g.Animals, d)

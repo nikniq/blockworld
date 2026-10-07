@@ -595,7 +595,12 @@ func TestFarmingAndBow(t *testing.T) {
 	if p.Inv[Bread] != 1 || blocks[Bread].Food == 0 {
 		t.Fatal("three wheat should bake one loaf")
 	}
-	// Bow: an arrow flying into a zombie hurts it.
+	// Bow: an arrow flying into a zombie hurts it (clear the air along its path first).
+	for zz := 15; zz <= 22; zz++ {
+		for yy := 29; yy <= 33; yy++ {
+			w.Set(20, yy, zz, Air)
+		}
+	}
 	e := NewEnemy(rl.NewVector3(20.5, 30, 20.5), KindZombie, 1)
 	g.Enemies = append(g.Enemies, e)
 	g.Arrows = append(g.Arrows, Arrow{Pos: rl.NewVector3(20.5, 31, 17), Vel: rl.NewVector3(0, 0, 30), Life: 2, Owner: 1})
