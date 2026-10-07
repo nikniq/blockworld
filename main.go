@@ -718,7 +718,7 @@ func (g *Game) updateBuilder(dt float32) {
 		g.trySleep()
 		return
 	}
-	if usePressed() && p.Held.Kind == ItemBlock && p.Inv[p.Held.Block] > 0 {
+	if usePressed() && p.Held.Kind == ItemBlock && (p.Inv[p.Held.Block] > 0 || settings.Creative) {
 		x, y, z := a.X+a.NX, a.Y+a.NY, a.Z+a.NZ
 		target := w.Get(x, y, z)
 		held := &blocks[p.Held.Block]
@@ -737,7 +737,9 @@ func (g *Game) updateBuilder(dt float32) {
 				w.Set(x, y, z, p.Held.Block)
 				g.sendFx(Fx{Kind: FxPlace, Pos: rl.NewVector3(float32(x), float32(y), float32(z))})
 			}
-			p.Inv[p.Held.Block]--
+			if !settings.Creative {
+				p.Inv[p.Held.Block]--
+			}
 			p.Swing = 1
 			g.Audio.Play(g.Audio.Place, 0.7)
 			p.EnsureHeld()
@@ -754,7 +756,7 @@ func (g *Game) breakBlock(x, y, z int) {
 	info := &blocks[b]
 	g.World.Set(x, y, z, Air)
 	centre := rl.NewVector3(float32(x)+0.5, float32(y)+0.5, float32(z)+0.5)
-	if info.Drops != Air {
+	if info.Drops != Air && !settings.Creative {
 		g.spawnDrop(centre, info.Drops, 0)
 	}
 	if b == Leaves && rand.Float32() < 0.15 {
@@ -887,6 +889,8 @@ func (g *Game) soak(frame int) bool {
 	}
 	if frame%1000 == 0 {
 		g.Reset()
+		settings.Creative = !settings.Creative
+		g.ThirdPerson = true
 	}
 	if frame%3 == 0 {
 		// Input-driven paths: aim at terrain, shoot, swing, mine and place.
@@ -1435,11 +1439,11 @@ func (g *Game) draw3D() {
 	w.BeginShader()
 	for _, e := range g.Enemies {
 		e.Lum = w.Luminance(rl.NewVector3(e.Pos.X, e.Pos.Y+0.5, e.Pos.Z), env.Light)
-		e.Draw()
+		e.Draw(w)
 	}
 	for _, a := range g.Animals {
 		a.Lum = w.Luminance(rl.NewVector3(a.Pos.X, a.Pos.Y+0.5, a.Pos.Z), env.Light)
-		a.Draw()
+		a.Draw(w)
 	}
 	if g.ThirdPerson {
 		g.drawHumanoid(g.localState(), p.EyeOff, p.SwordTier, p.PickTier, w.Luminance(rl.NewVector3(p.Pos.X, p.Pos.Y+1, p.Pos.Z), env.Light))
@@ -1504,59 +1508,11 @@ func (g *Game) draw3D() {
 	rl.EndMode3D()
 }
 
-// drawHumanoid draws a blocky player: the local one in third person, or a remote one.
+// drawHumanoid draws a player: the local one in third person, or a remote one.
 func (g *Game) drawHumanoid(ps PlayerState, eyeOff float32, swordTier, pickTier int, lum float32) {
-	fwd := rl.NewVector3(float32(math.Sin(float64(ps.Yaw))), 0, float32(math.Cos(float64(ps.Yaw))))
-	side := rl.NewVector3(-float32(math.Cos(float64(ps.Yaw))), 0, float32(math.Sin(float64(ps.Yaw))))
-	x, z := ps.Pos.X, ps.Pos.Z
-	y := ps.Pos.Y - eyeOff*0.5
-	p := struct {
-		BobPhase, BobAmount, Swing float32
-		Held                       Item
-		SwordTier, PickTier        int
-	}{ps.BobPhase, ps.BobAmt, ps.Swing, ps.Held, swordTier, pickTier}
-	skin := mul(rl.NewColor(200, 160, 120, 255), lum)
-	shirt := mul(rl.NewColor(60, 170, 170, 255), lum)
-	pants := mul(rl.NewColor(50, 60, 150, 255), lum)
-	hair := mul(rl.NewColor(70, 45, 30, 255), lum)
-	outline := rl.NewColor(20, 20, 20, 255)
-	swing := float32(math.Sin(float64(p.BobPhase))) * 0.3 * p.BobAmount
-	for _, sg := range []float32{-1, 1} {
-		lp := rl.Vector3Add(rl.NewVector3(x, y+0.4, z), rl.Vector3Add(rl.Vector3Scale(side, sg*0.15), rl.Vector3Scale(fwd, swing*sg)))
-		rl.DrawCubeV(lp, rl.NewVector3(0.26, 0.8, 0.26), pants)
-	}
-	torso := rl.NewVector3(x, y+1.1, z)
-	rl.DrawCubeV(torso, rl.NewVector3(0.6, 0.7, 0.32), shirt)
-	rl.DrawCubeWiresV(torso, rl.NewVector3(0.6, 0.7, 0.32), outline)
-	for _, sg := range []float32{-1, 1} {
-		armSwing := swing * -sg
-		if p.Swing > 0 && sg == 1 {
-			armSwing = 0.4 * p.Swing
-		}
-		ap := rl.Vector3Add(rl.NewVector3(x, y+1.1, z), rl.Vector3Add(rl.Vector3Scale(side, sg*0.42), rl.Vector3Scale(fwd, armSwing)))
-		rl.DrawCubeV(ap, rl.NewVector3(0.22, 0.7, 0.22), skin)
-	}
-	head := rl.NewVector3(x, y+1.72, z)
-	rl.DrawCubeV(head, rl.NewVector3(0.5, 0.5, 0.5), skin)
-	rl.DrawCubeV(rl.Vector3Add(head, rl.NewVector3(0, 0.2, 0)), rl.NewVector3(0.52, 0.14, 0.52), hair)
-	rl.DrawCubeWiresV(head, rl.NewVector3(0.5, 0.5, 0.5), outline)
-	eyes := rl.Vector3Add(head, rl.Vector3Scale(fwd, 0.26))
-	for _, sg := range []float32{-1, 1} {
-		rl.DrawCubeV(rl.Vector3Add(eyes, rl.Vector3Scale(side, sg*0.11)), rl.NewVector3(0.08, 0.08, 0.02), rl.NewColor(30, 30, 60, 255))
-	}
-	// Held tool or block.
-	hand := rl.Vector3Add(rl.NewVector3(x, y+0.85, z), rl.Vector3Add(rl.Vector3Scale(side, 0.45), rl.Vector3Scale(fwd, 0.3)))
-	switch p.Held.Kind {
-	case ItemBlock, ItemFood:
-		g.World.DrawBlockAt(p.Held.Block, rl.MatrixMultiply(rl.MatrixScale(0.3, 0.3, 0.3), rl.MatrixTranslate(hand.X, hand.Y, hand.Z)))
-	case ItemSword:
-		rl.DrawCubeV(rl.Vector3Add(hand, rl.Vector3Scale(fwd, 0.3)), rl.NewVector3(0.08, 0.1, 0.8), mul(tierColors[p.SwordTier], lum))
-	case ItemPickaxe:
-		rl.DrawCubeV(rl.Vector3Add(hand, rl.Vector3Scale(fwd, 0.3)), rl.NewVector3(0.08, 0.08, 0.7), mul(rl.NewColor(120, 85, 45, 255), lum))
-		rl.DrawCubeV(rl.Vector3Add(hand, rl.Vector3Scale(fwd, 0.6)), rl.NewVector3(0.3, 0.12, 0.12), mul(tierColors[p.PickTier], lum))
-	case ItemRifle:
-		rl.DrawCubeV(rl.Vector3Add(hand, rl.Vector3Scale(fwd, 0.35)), rl.NewVector3(0.1, 0.14, 0.9), mul(rl.NewColor(50, 52, 58, 255), lum))
-	}
+	pose := Pose{Pos: ps.Pos, Yaw: ps.Yaw, Pitch: ps.Pitch, Phase: ps.BobPhase, Amp: ps.BobAmt, Swing: ps.Swing,
+		Scale: 0.9, Lum: lum, Alpha: 1, Sneak: ps.Sneak || eyeOff > 0.15, Held: ps.Held, SwordTier: swordTier, PickTier: pickTier}
+	skins.DrawHumanoid(g.World, SkinPlayer, &pose)
 }
 
 var tierColors = [...]rl.Color{
@@ -1680,6 +1636,9 @@ func (g *Game) drawHotbar(sw, sh int32) {
 			case ItemBlock, ItemFood:
 				g.drawBlockIcon(it.Block, x+9, y0+9, slot-18)
 				cnt := fmt.Sprintf("%d", p.Inv[it.Block])
+				if settings.Creative {
+					cnt = "oo"
+				}
 				tw := rl.MeasureText(cnt, 16)
 				rl.DrawText(cnt, x+slot-tw-3, y0+slot-18, 16, rl.Black)
 				rl.DrawText(cnt, x+slot-tw-4, y0+slot-19, 16, rl.White)
@@ -1781,6 +1740,13 @@ func (g *Game) drawHUD() {
 	rl.DrawText(fmt.Sprintf("%d", p.HP), hx+10*26+4, hy, 20, rl.White)
 	if p.Sneak {
 		rl.DrawText("SNEAKING", hx, hy-30, 16, rl.LightGray)
+	}
+	if settings.Creative {
+		label := "CREATIVE"
+		if p.Flying {
+			label = "CREATIVE  -  FLYING"
+		}
+		rl.DrawText(label, hx, hy-30, 16, rl.SkyBlue)
 	}
 
 	// Ammo.
@@ -1913,7 +1879,7 @@ func (g *Game) drawHelp(sw, sh int32) {
 		"E crafting   R reload   F5 third person   F11 fullscreen   ESC pause and settings",
 		"Torches keep hostiles from rising nearby. Undead burn at sunrise. Creepers explode.",
 		"Beds set your spawn point and skip the night. Dying drops your items where you fell.",
-		"Online: T chat   P player list",
+		"Online: T chat   P player list      Creative mode (G in pause): fly with double-tap SPACE, build freely",
 		"H closes this help",
 	}
 	w := int32(760)
@@ -2028,6 +1994,12 @@ func (g *Game) updateSettings() {
 		settings.SwapButtons = !settings.SwapButtons
 	case rl.IsKeyPressed(rl.KeyD):
 		settings.Difficulty = (settings.Difficulty + 1) % 3
+	case rl.IsKeyPressed(rl.KeyG):
+		settings.Creative = !settings.Creative
+		if !settings.Creative {
+			g.Player.Flying = false
+		}
+		g.Player.EnsureHeld()
 	case rl.IsKeyPressed(rl.KeyF11):
 		toggleFullscreen()
 	default:
@@ -2093,6 +2065,11 @@ func (g *Game) drawOverlay() {
 		}
 		centered("B  swap mouse buttons:  "+swap, sh/2+148, 20, rl.White)
 		centered(fmt.Sprintf("D  difficulty  %s", difficultyNames[settings.Difficulty]), sh/2+174, 20, rl.White)
+		mode := "Survival"
+		if settings.Creative {
+			mode = "Creative  (double-tap SPACE to fly, SHIFT descends)"
+		}
+		centered("G  game mode  "+mode, sh/2+200, 20, rl.White)
 	case StateGameOver:
 		centered("YOU DIED", sh/2-120, 64, rl.Red)
 		if g.Player.Cause != "" {

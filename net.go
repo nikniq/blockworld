@@ -792,7 +792,7 @@ func (g *Game) localTarget() Target {
 // targets lists everyone hostiles may chase.
 func (g *Game) targets() []Target {
 	ts := []Target{}
-	if g.Player.HP > 0 && !g.Headless {
+	if g.Player.HP > 0 && !g.Headless && !settings.Creative {
 		ts = append(ts, g.localTarget())
 	}
 	for _, r := range g.Remotes {

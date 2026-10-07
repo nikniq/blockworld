@@ -133,50 +133,37 @@ func (a *Animal) Hit(dmg int) bool {
 	return false
 }
 
-func (a *Animal) Draw() {
-	s := a.Spec
-	x, z := a.Pos.X, a.Pos.Z
+func (a *Animal) Draw(w *World) {
+	kind := SkinPig
+	scale := float32(1)
+	switch a.Kind {
+	case AnimalCow:
+		kind, scale = SkinCow, 0.93
+	case AnimalSheep:
+		kind, scale = SkinSheep, 0.95
+	}
+	amp := float32(0)
+	if a.Walking || a.Flee > 0 {
+		amp = 1
+	}
+	pose := Pose{Pos: a.Pos, Yaw: yawOf(a.Heading), Phase: a.Phase, Amp: amp, Scale: scale, Lum: a.Lum, Alpha: 1}
 	if !a.Alive {
-		t := clamp(1-a.DeathT*2.5, 0, 1)
-		if t <= 0 {
+		pose.Death = clamp(a.DeathT*2.5, 0, 1)
+		pose.Alpha = 1 - pose.Death
+		pose.Amp = 0
+		if pose.Death >= 1 {
 			return
 		}
-		rl.DrawCubeV(rl.NewVector3(x, a.Pos.Y+0.3*t, z), rl.NewVector3(s.Radius*2.4, 0.6*t+0.05, s.Radius*2.4), mul(rl.NewColor(s.Body.R, s.Body.G, s.Body.B, uint8(200*t)), a.Lum))
-		return
 	}
-	body, head, legs := mul(s.Body, a.Lum), mul(s.Head, a.Lum), mul(s.Legs, a.Lum)
-	outline := rl.NewColor(20, 20, 20, 255)
-	fwd := a.Heading
-	side := rl.NewVector3(-fwd.Z, 0, fwd.X)
-	h := s.Height
-	legH := h * 0.4
-	bodyLen, bodyW := s.Radius*2.6, s.Radius*1.7
-	// Legs.
-	for _, d := range [][2]float32{{-1, -1}, {1, -1}, {-1, 1}, {1, 1}} {
-		swing := float32(math.Sin(float64(a.Phase)))*0.12*d[0]*d[1] + 0.2
-		lp := rl.Vector3Add(rl.NewVector3(x, a.Pos.Y+legH/2, z), rl.Vector3Add(rl.Vector3Scale(side, d[0]*bodyW*0.35), rl.Vector3Scale(fwd, d[1]*bodyLen*0.35+swing*0.3-0.06)))
-		rl.DrawCubeV(lp, rl.NewVector3(0.2, legH, 0.2), legs)
+	if a.Flee > 4.7 {
+		pose.Flash = (a.Flee - 4.7) / 0.3
 	}
-	// Body: axis-aligned box scaled by the heading so it looks roughly oriented.
-	bx := float32(math.Abs(float64(fwd.X)))*bodyLen + float32(math.Abs(float64(fwd.Z)))*bodyW
-	bz := float32(math.Abs(float64(fwd.Z)))*bodyLen + float32(math.Abs(float64(fwd.X)))*bodyW
-	bc := rl.NewVector3(x, a.Pos.Y+legH+(h-legH)*0.5, z)
-	rl.DrawCubeV(bc, rl.NewVector3(bx, h-legH, bz), body)
-	rl.DrawCubeWiresV(bc, rl.NewVector3(bx, h-legH, bz), outline)
-	// Head.
-	hs := s.Radius * 1.3
-	hp := rl.Vector3Add(rl.NewVector3(x, a.Pos.Y+h-hs*0.4, z), rl.Vector3Scale(fwd, bodyLen*0.5+hs*0.3))
-	rl.DrawCubeV(hp, rl.NewVector3(hs, hs, hs), head)
-	rl.DrawCubeWiresV(hp, rl.NewVector3(hs, hs, hs), outline)
-	if a.Kind == AnimalPig {
-		snout := rl.Vector3Add(hp, rl.Vector3Scale(fwd, hs/2))
-		rl.DrawCubeV(snout, rl.NewVector3(hs*0.4, hs*0.3, 0.08), mul(rl.NewColor(210, 120, 140, 255), a.Lum))
-	}
-	if a.HP < s.HP {
-		top := a.Pos.Y + h + 0.2
-		frac := float32(a.HP) / float32(s.HP)
-		rl.DrawCubeV(rl.NewVector3(x, top, z), rl.NewVector3(1.0, 0.08, 0.08), rl.NewColor(0, 0, 0, 180))
-		rl.DrawCubeV(rl.NewVector3(x-(1-frac)*0.5, top, z), rl.NewVector3(frac, 0.1, 0.1), rl.Lime)
+	skins.DrawQuadruped(w, kind, &pose)
+	if a.Alive && a.HP < a.Spec.HP {
+		top := a.Pos.Y + a.Spec.Height + 0.2
+		frac := float32(a.HP) / float32(a.Spec.HP)
+		rl.DrawCubeV(rl.NewVector3(a.Pos.X, top, a.Pos.Z), rl.NewVector3(1.0, 0.08, 0.08), rl.NewColor(0, 0, 0, 180))
+		rl.DrawCubeV(rl.NewVector3(a.Pos.X-(1-frac)*0.5, top, a.Pos.Z), rl.NewVector3(frac, 0.1, 0.1), rl.Lime)
 	}
 }
 

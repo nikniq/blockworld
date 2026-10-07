@@ -20,6 +20,7 @@ type Settings struct {
 	Difficulty  int  // 0 peaceful, 1 normal, 2 hard
 	LastJoin    string
 	Name        string // player name shown to others
+	Creative    bool   // creative mode: fly, build freely, take no damage
 }
 
 var difficultyNames = [...]string{"Peaceful", "Normal", "Hard"}
@@ -72,6 +73,8 @@ func loadSettings() Settings {
 			s.LastJoin = v
 		case "name":
 			s.Name = v
+		case "creative":
+			s.Creative = v == "true"
 		case "difficulty":
 			if n, err := strconv.Atoi(v); err == nil && n >= 0 && n <= 2 {
 				s.Difficulty = n
@@ -89,7 +92,7 @@ func (s Settings) save() {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return
 	}
-	text := fmt.Sprintf("sensitivity=%.2f\nvolume=%.2f\ninvert_y=%t\nfullscreen=%t\nswap_buttons=%t\ndifficulty=%d\nlast_join=%s\nname=%s\n", s.Sensitivity, s.Volume, s.InvertY, s.Fullscreen, s.SwapButtons, s.Difficulty, s.LastJoin, s.Name)
+	text := fmt.Sprintf("sensitivity=%.2f\nvolume=%.2f\ninvert_y=%t\nfullscreen=%t\nswap_buttons=%t\ndifficulty=%d\nlast_join=%s\nname=%s\ncreative=%t\n", s.Sensitivity, s.Volume, s.InvertY, s.Fullscreen, s.SwapButtons, s.Difficulty, s.LastJoin, s.Name, s.Creative)
 	_ = os.WriteFile(p, []byte(text), 0o644)
 }
 

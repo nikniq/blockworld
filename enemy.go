@@ -261,104 +261,56 @@ func (e *Enemy) tint(c rl.Color) rl.Color {
 		f := uint8(e.HitFlash * 255)
 		return rl.NewColor(max(c.R, f), max(c.G, f), max(c.B, f), 255)
 	}
-	if e.Fuse > 0 {
-		f := float32(math.Sin(float64(e.Fuse*22)))*0.5 + 0.5
-		return mix(c, rl.White, f*0.85)
-	}
 	return c
 }
 
-func (e *Enemy) Draw() {
+// modelScale maps the hostile's collision height onto its skinned model.
+func (e *Enemy) modelScale() float32 {
+	switch e.Kind {
+	case KindCreeper:
+		return e.Spec.Height / 1.625
+	case KindSpider:
+		return e.Spec.Height / 0.95
+	}
+	return e.Spec.Height / 2.0
+}
+
+// Draw renders the skinned, animated model.
+func (e *Enemy) Draw(w *World) {
 	s := e.Spec
+	pose := Pose{Pos: e.Pos, Yaw: yawOf(e.Heading), Phase: e.Phase, Amp: 1, Scale: e.modelScale(), Lum: e.Lum, Alpha: 1}
 	if !e.Alive {
-		// Collapse animation.
-		t := clamp(1-e.DeathT*2.5, 0, 1)
-		if t <= 0 {
+		pose.Death = clamp(e.DeathT*2.5, 0, 1)
+		pose.Alpha = 1 - pose.Death
+		pose.Amp = 0
+		if pose.Death >= 1 {
 			return
 		}
-		c := mul(rl.NewColor(s.Body.R/2, s.Body.G/2, s.Body.B/2, uint8(200*t)), e.Lum)
-		w := s.Radius * 2.6
-		rl.DrawCubeV(rl.NewVector3(e.Pos.X, e.Pos.Y+0.5*t, e.Pos.Z), rl.NewVector3(w, 1.0*t+0.05, w), c)
-		return
 	}
-	body, head := e.tint(s.Body), e.tint(s.Head)
-	dark := e.tint(rl.NewColor(s.Body.R/3, s.Body.G/3, s.Body.B/3, 255))
-	outline := rl.NewColor(20, 20, 20, 255)
-	x, z := e.Pos.X, e.Pos.Z
-	bob := float32(math.Abs(math.Sin(float64(e.Phase)))) * 0.08
-	y := e.Pos.Y + bob
-	fwd := e.Heading
-	if rl.Vector3Length(fwd) < 0.01 {
-		fwd = rl.NewVector3(0, 0, 1)
+	pose.Flash = e.HitFlash
+	if e.Fuse > 0 {
+		pose.Flash = max(pose.Flash, (float32(math.Sin(float64(e.Fuse*22)))*0.5+0.5)*0.9)
+		pose.Amp = 0
 	}
-	side := rl.NewVector3(-fwd.Z, 0, fwd.X)
-
 	switch e.Kind {
 	case KindSpider:
-		// Low, wide body with eight stubby legs.
-		rl.DrawCubeV(rl.NewVector3(x, y+0.5, z), rl.NewVector3(0.9, 0.5, 1.1), body)
-		rl.DrawCubeWiresV(rl.NewVector3(x, y+0.5, z), rl.NewVector3(0.9, 0.5, 1.1), outline)
-		hp := rl.Vector3Add(rl.NewVector3(x, y+0.55, z), rl.Vector3Scale(fwd, 0.65))
-		rl.DrawCubeV(hp, rl.NewVector3(0.5, 0.45, 0.4), head)
-		for i := 0; i < 4; i++ {
-			off := float32(i)*0.28 - 0.42
-			lift := float32(math.Sin(float64(e.Phase+float32(i)*1.7))) * 0.1
-			for _, sg := range []float32{-1, 1} {
-				lp := rl.Vector3Add(rl.NewVector3(x, y+0.35+lift*sg, z), rl.Vector3Add(rl.Vector3Scale(side, sg*0.75), rl.Vector3Scale(fwd, off)))
-				rl.DrawCubeV(lp, rl.NewVector3(0.5, 0.12, 0.12), dark)
-			}
-		}
+		skins.DrawSpider(w, &pose)
 	case KindCreeper:
-		// Tall thin body on four short legs, no arms.
-		for _, d := range [][2]float32{{-1, -1}, {1, -1}, {-1, 1}, {1, 1}} {
-			step := float32(math.Sin(float64(e.Phase)))*0.08*d[0]*d[1] + 0.2
-			lp := rl.Vector3Add(rl.NewVector3(x, y+step, z), rl.Vector3Add(rl.Vector3Scale(side, d[0]*0.16), rl.Vector3Scale(fwd, d[1]*0.16)))
-			rl.DrawCubeV(lp, rl.NewVector3(0.24, 0.4, 0.24), dark)
-		}
-		rl.DrawCubeV(rl.NewVector3(x, y+0.95, z), rl.NewVector3(0.5, 1.1, 0.5), body)
-		rl.DrawCubeWiresV(rl.NewVector3(x, y+0.95, z), rl.NewVector3(0.5, 1.1, 0.5), outline)
-		hs := s.HeadR * 1.8
-		rl.DrawCubeV(rl.NewVector3(x, y+e.HeadY(), z), rl.NewVector3(hs, hs, hs), head)
-		rl.DrawCubeWiresV(rl.NewVector3(x, y+e.HeadY(), z), rl.NewVector3(hs, hs, hs), outline)
-		// Frowning mouth.
-		mp := rl.Vector3Add(rl.NewVector3(x, y+e.HeadY()-hs*0.2, z), rl.Vector3Scale(fwd, hs/2+0.01))
-		rl.DrawCubeV(mp, rl.NewVector3(hs*0.3, hs*0.25, 0.02), rl.NewColor(10, 10, 10, 255))
+		skins.DrawCreeper(w, &pose)
+	case KindSkeleton:
+		skins.DrawHumanoid(w, SkinSkeleton, &pose)
+	case KindBrute, KindGiant:
+		pose.ArmsOut = true
+		skins.DrawHumanoid(w, SkinBrute, &pose)
 	default:
-		kw := s.Radius / 0.35 // width scale relative to a zombie
-		kh := s.Height / 1.9  // height scale relative to a zombie
-		legs := rl.NewColor(50, 50, 130, 255)
-		if e.Kind == KindBrute {
-			legs = dark
-		} else if e.Kind == KindSkeleton {
-			legs = s.Body
-		}
-		legs = e.tint(legs)
-		swing := float32(math.Sin(float64(e.Phase))) * 0.15
-		for _, sg := range []float32{-1, 1} {
-			lp := rl.Vector3Add(rl.NewVector3(x, y+0.35*kh, z), rl.Vector3Add(rl.Vector3Scale(side, sg*0.17*kw), rl.Vector3Scale(fwd, swing*sg)))
-			rl.DrawCubeV(lp, rl.NewVector3(0.26*kw, 0.7*kh, 0.26*kw), legs)
-		}
-		torso := rl.NewVector3(x, y+1.0*kh, z)
-		tsz := rl.NewVector3(0.7*kw, 0.7*kh, 0.4*kw)
-		rl.DrawCubeV(torso, tsz, body)
-		rl.DrawCubeWiresV(torso, tsz, outline)
-		if e.Kind == KindSkeleton {
-			// Bow held out to one side.
-			ap := rl.Vector3Add(rl.NewVector3(x, y+1.15*kh, z), rl.Vector3Add(rl.Vector3Scale(side, 0.4*kw), rl.Vector3Scale(fwd, 0.4*kw)))
-			rl.DrawCubeV(ap, rl.NewVector3(0.16, 0.2, 0.6), head)
-			bp := rl.Vector3Add(ap, rl.Vector3Scale(fwd, 0.35))
-			rl.DrawCubeV(bp, rl.NewVector3(0.08, 1.0, 0.08), e.tint(rl.NewColor(120, 85, 45, 255)))
-		} else {
-			// Arms held out in front, zombie style.
-			for _, sg := range []float32{-1, 1} {
-				ap := rl.Vector3Add(rl.NewVector3(x, y+1.15*kh, z), rl.Vector3Add(rl.Vector3Scale(side, sg*0.45*kw), rl.Vector3Scale(fwd, 0.35*kw)))
-				rl.DrawCubeV(ap, rl.NewVector3(0.2*kw, 0.2*kh, 0.7*kw), head)
-			}
-		}
-		hs := s.HeadR * 1.8
-		rl.DrawCubeV(rl.NewVector3(x, y+e.HeadY(), z), rl.NewVector3(hs, hs, hs), head)
-		rl.DrawCubeWiresV(rl.NewVector3(x, y+e.HeadY(), z), rl.NewVector3(hs, hs, hs), outline)
+		pose.ArmsOut = true
+		skins.DrawHumanoid(w, SkinZombie, &pose)
 	}
+	if !e.Alive {
+		return
+	}
+	x, z := e.Pos.X, e.Pos.Z
+	y := e.Pos.Y
 	if e.Burning {
 		// Flames licking up the body.
 		for i := 0; i < 4; i++ {
@@ -387,19 +339,24 @@ func (e *Enemy) DrawGlow() {
 		fwd = rl.NewVector3(0, 0, 1)
 	}
 	side := rl.NewVector3(-fwd.Z, 0, fwd.X)
-	bob := float32(math.Abs(math.Sin(float64(e.Phase)))) * 0.08
-	y := e.Pos.Y + bob
+	sc := e.modelScale()
 	if e.Kind == KindSpider {
-		hp := rl.Vector3Add(rl.NewVector3(e.Pos.X, y+0.6, e.Pos.Z), rl.Vector3Scale(fwd, 0.86))
+		hp := rl.Vector3Add(rl.NewVector3(e.Pos.X, e.Pos.Y+0.6*sc, e.Pos.Z), rl.Vector3Scale(fwd, 0.88*sc))
 		for _, sg := range []float32{-1.5, -0.5, 0.5, 1.5} {
-			rl.DrawCubeV(rl.Vector3Add(hp, rl.Vector3Scale(side, sg*0.1)), rl.NewVector3(0.07, 0.07, 0.03), s.Eyes)
+			rl.DrawCubeV(rl.Vector3Add(hp, rl.Vector3Scale(side, sg*0.1*sc)), rl.NewVector3(0.06, 0.06, 0.03), s.Eyes)
 		}
 		return
 	}
-	hs := s.HeadR * 1.8
-	f := rl.Vector3Scale(fwd, hs/2+0.01)
+	if e.Kind == KindCreeper {
+		return
+	}
+	headY := e.Pos.Y + 1.72*sc
+	if e.Kind == KindCreeper {
+		headY = e.Pos.Y + 1.375*sc
+	}
+	f := rl.Vector3Scale(fwd, 0.26*sc)
 	for _, sgn := range []float32{-1, 1} {
-		ep := rl.Vector3Add(rl.NewVector3(e.Pos.X, y+e.HeadY()+hs*0.1, e.Pos.Z), rl.Vector3Add(f, rl.Vector3Scale(side, sgn*hs*0.22)))
-		rl.DrawCubeV(ep, rl.NewVector3(hs*0.18, hs*0.18, 0.03), s.Eyes)
+		ep := rl.Vector3Add(rl.NewVector3(e.Pos.X, headY+0.03*sc, e.Pos.Z), rl.Vector3Add(f, rl.Vector3Scale(side, sgn*0.11*sc)))
+		rl.DrawCubeV(ep, rl.NewVector3(0.07*sc, 0.07*sc, 0.03), s.Eyes)
 	}
 }

@@ -1015,6 +1015,11 @@ func (m *meshBuf) emitFace(f *faceDef, b Block, x, y, z float32, box [2][3]float
 		face = 2
 	}
 	u0, v0, u1, v1 := tileUV(b, face)
+	m.emitFaceUV(f, u0, v0, u1, v1, x, y, z, box, tint, ao, light)
+}
+
+// emitFaceUV is emitFace with an explicit texture rectangle (character skins use it too).
+func (m *meshBuf) emitFaceUV(f *faceDef, u0, v0, u1, v1, x, y, z float32, box [2][3]float32, tint float32, ao [4]int, light [4]cornerLight) {
 	var pos [4][3]float32
 	var uv [4][2]float32
 	var shade [4]uint8
@@ -1265,6 +1270,7 @@ func (w *World) Unload() {
 	for _, m := range w.blockM {
 		m.free()
 	}
+	skins.Unload()
 	if w.gpu {
 		rl.UnloadTexture(w.tex)
 		if w.shaderOK {

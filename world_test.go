@@ -526,3 +526,32 @@ func TestLocalStateOffline(t *testing.T) {
 		t.Fatalf("bad offline state %+v", st)
 	}
 }
+
+// Creative mode: no damage, unlimited placeable blocks on the hotbar, instant mining.
+func TestCreativeMode(t *testing.T) {
+	settings.Creative = true
+	defer func() { settings.Creative = false }()
+	p := NewPlayer(rl.Vector3{})
+	p.Hurt(50, "test", true)
+	if p.HP != maxHealth {
+		t.Fatal("creative players take no damage")
+	}
+	found := false
+	for _, it := range p.Hotbar() {
+		if it == (Item{ItemBlock, DiamondOre}) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("creative hotbar should list every placeable block")
+	}
+	if p.MineTime(Stone) > 0.1 {
+		t.Fatal("creative mining is instant")
+	}
+	g := &Game{Audio: &Audio{}, CraftHover: -1}
+	g.Reset()
+	if len(g.targets()) != 1 || g.targets()[0].ID != 0 {
+		// A creative player is still a fallback target when nobody else exists.
+		t.Fatalf("targets %v", g.targets())
+	}
+}

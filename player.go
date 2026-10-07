@@ -12,6 +12,7 @@ const (
 	eyeHeight    = 1.62
 	walkSpeed    = 5.0
 	sprintSpeed  = 7.8
+	flySpeed     = 11.0
 	sneakSpeed   = 2.0
 	jumpSpeed    = 6.9 // clears just over one block
 	gravity      = 19.0
@@ -64,6 +65,8 @@ type Player struct {
 	CactusT   float32
 	StepDist  float32 // distance walked since the last footstep
 	Stepped   bool    // a footstep landed this frame (the game plays the sound)
+	Flying    bool    // creative flight
+	JumpTapT  float32 // seconds since the last jump press (double tap toggles flight)
 	Sneak     bool
 	Sprinting bool
 	EyeOff    float32 // eye height offset while sneaking (smoothed)
@@ -167,7 +170,7 @@ func (p *Player) Box() rl.BoundingBox {
 func (p *Player) Hotbar() []Item {
 	items := []Item{{Kind: ItemRifle}, {Kind: ItemSword}, {Kind: ItemPickaxe}}
 	for b := Block(1); b < numBlocks; b++ {
-		if p.Inv[b] > 0 && b.Placeable() {
+		if (p.Inv[b] > 0 || settings.Creative) && b.Placeable() {
 			items = append(items, Item{ItemBlock, b})
 		} else if p.Inv[b] > 0 && blocks[b].Food > 0 {
 			items = append(items, Item{ItemFood, b})
@@ -218,7 +221,7 @@ func (p *Player) CycleHotbar(step int) { p.selectIndex(p.SelIndex() + step) }
 
 // HoldBlock selects a block stack if the player owns it.
 func (p *Player) HoldBlock(b Block) {
-	if p.Inv[b] > 0 && b.Placeable() {
+	if (p.Inv[b] > 0 || settings.Creative) && b.Placeable() {
 		p.Held = Item{ItemBlock, b}
 		p.EnsureHeld()
 	}
@@ -231,6 +234,9 @@ func (p *Player) MineTime(b Block) float32 {
 	info := &blocks[b]
 	if info.MineTime < 0 {
 		return -1
+	}
+	if settings.Creative {
+		return 0.05
 	}
 	if !info.Hard {
 		return info.MineTime
@@ -317,6 +323,26 @@ func (p *Player) Update(dt float32, w *World) {
 	} else if p.Sprinting {
 		speed = sprintSpeed
 	}
+	// Creative flight: double-tap jump to toggle.
+	p.JumpTapT += dt
+	if settings.Creative && rl.IsKeyPressed(rl.KeySpace) {
+		if p.JumpTapT < 0.3 {
+			p.Flying = !p.Flying
+			p.VelY = 0
+			p.JumpTapT = 1
+		} else {
+			p.JumpTapT = 0
+		}
+	}
+	if !settings.Creative {
+		p.Flying = false
+	}
+	if p.Flying {
+		speed = flySpeed
+		if p.Sprinting || (rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl)) {
+			speed = flySpeed * 2
+		}
+	}
 
 	feet := rl.NewVector3(p.Pos.X, p.Pos.Y+0.4, p.Pos.Z)
 	p.InWater = w.LiquidAt(feet)
@@ -333,8 +359,16 @@ func (p *Player) Update(dt float32, w *World) {
 		delta.X, delta.Z = m.X, m.Z
 	}
 
-	// Vertical: swim in water, otherwise jump and fall.
-	if p.OnLadder && !p.InWater {
+	// Vertical: fly, swim in water, otherwise jump and fall.
+	if p.Flying {
+		p.VelY = 0
+		if rl.IsKeyDown(rl.KeySpace) {
+			p.VelY = speed * 0.8
+		}
+		if rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift) {
+			p.VelY = -speed * 0.8
+		}
+	} else if p.OnLadder && !p.InWater {
 		// Climb with jump or forward, otherwise slide down slowly.
 		p.VelY = -1.2
 		if rl.IsKeyDown(rl.KeySpace) || rl.IsKeyDown(rl.KeyW) {
@@ -357,6 +391,9 @@ func (p *Player) Update(dt float32, w *World) {
 	impact := p.VelY
 	wasGround := p.OnGround
 	var res MoveResult
+	if p.Flying {
+		p.Sneak = false // shift descends instead
+	}
 	if p.Sneak && p.OnGround && !p.InWater {
 		// Sneaking never walks off an edge: apply each axis only if ground remains.
 		for _, d := range [2]rl.Vector3{{X: delta.X}, {Z: delta.Z}} {
@@ -373,11 +410,14 @@ func (p *Player) Update(dt float32, w *World) {
 	if res.Ground || res.Ceiling {
 		p.VelY = 0
 	}
+	if p.Flying && res.Ground && rl.IsKeyDown(rl.KeyLeftShift) {
+		p.Flying = false // landed
+	}
 	if (p.InWater || atSurface) && res.Wall && moving {
 		p.VelY = max(p.VelY, 5.5) // swimming against a bank climbs out of the water
 	}
 	p.OnGround = res.Ground
-	if p.OnGround && !wasGround && impact < -fallSafeV && !p.InWater && !p.OnLadder {
+	if p.OnGround && !wasGround && impact < -fallSafeV && !p.InWater && !p.OnLadder && !p.Flying {
 		p.FallDmg = int((-impact - fallSafeV) * 3)
 		p.Hurt(p.FallDmg, "fell from a high place", false)
 	}
@@ -502,7 +542,7 @@ func (p *Player) Hurt(n int, cause string, armored bool) {
 }
 
 func (p *Player) Damage(n int) {
-	if n <= 0 {
+	if n <= 0 || settings.Creative {
 		return
 	}
 	p.HP -= n

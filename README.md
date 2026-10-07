@@ -19,6 +19,12 @@ block textures and sound effects are generated at startup.
   for a diamond and 500 points.
 - **Giants** walk on every fifth night: huge, slow, 60 health, and they smash through anything but
   bedrock to reach you. Worth 1500 points and three diamonds.
+- **Creative mode** (G on the pause screen): double-tap Space to fly (Space up, Shift down, Ctrl fast),
+  every block is on the hotbar in unlimited supply, blocks break instantly, and nothing can hurt you.
+  Hostiles ignore creative players.
+- **Characters** are textured, jointed models: swinging limbs, tilting heads, attack swings, and they
+  topple over when killed. Zombies shamble with their arms out, skeletons carry bows, creepers have
+  their face, spiders have eight legs and eight eyes, and the animals have faces and patches.
 - **Difficulty** (D on the pause screen): Peaceful has no hostiles and half damage from the world,
   Hard brings half again as many hostiles doing half again as much damage.
 - **Creepers** hiss when they reach you and explode, hurting everything nearby and blasting a crater.
