@@ -163,6 +163,9 @@ go build -o blockworld .
 ./blockworld
 ```
 
+The game runs in high-DPI mode, so on scaled desktops (Retina, Wayland or X11 at 150-200 percent)
+the whole window is used and the picture is rendered at the display's native resolution.
+
 ### Linux (Debian/Ubuntu)
 
 ```sh

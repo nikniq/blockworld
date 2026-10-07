@@ -77,7 +77,11 @@ var postfx PostFX
 
 // begin starts rendering the scene into the offscreen target (recreated on resize).
 func (p *PostFX) begin() bool {
-	sw, sh := int32(rl.GetScreenWidth()), int32(rl.GetScreenHeight())
+	// The target matches the framebuffer, which is larger than the logical window on scaled displays.
+	sw, sh := int32(rl.GetRenderWidth()), int32(rl.GetRenderHeight())
+	if sw <= 0 || sh <= 0 {
+		return false
+	}
 	if !p.ok {
 		p.shader = rl.LoadShaderFromMemory(postVertex, postFragment)
 		if !rl.IsShaderValid(p.shader) {
@@ -98,13 +102,15 @@ func (p *PostFX) begin() bool {
 	return true
 }
 
-// end finishes the scene and composites it to the screen with FXAA.
+// end finishes the scene and composites it to the screen with FXAA. The
+// target is framebuffer-sized; raylib's EndTextureMode restores the DPI
+// scale, so the blit is expressed in logical window coordinates.
 func (p *PostFX) end() {
 	rl.EndTextureMode()
 	rl.SetShaderValue(p.shader, p.locRes, []float32{float32(p.w), float32(p.h)}, rl.ShaderUniformVec2)
 	rl.BeginShaderMode(p.shader)
 	src := rl.NewRectangle(0, 0, float32(p.w), -float32(p.h))
-	dst := rl.NewRectangle(0, 0, float32(p.w), float32(p.h))
+	dst := rl.NewRectangle(0, 0, float32(rl.GetScreenWidth()), float32(rl.GetScreenHeight()))
 	rl.DrawTexturePro(p.target.Texture, src, dst, rl.Vector2{}, 0, rl.White)
 	rl.EndShaderMode()
 }

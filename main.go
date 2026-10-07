@@ -2839,7 +2839,9 @@ func main() {
 	}
 	playerName = *name
 
-	rl.SetConfigFlags(rl.FlagVsyncHint | rl.FlagWindowResizable)
+	// High-DPI: render at the framebuffer's real size so scaled desktops (Retina,
+	// Wayland and X11 with 150-200% scaling) fill the whole window.
+	rl.SetConfigFlags(rl.FlagVsyncHint | rl.FlagWindowResizable | rl.FlagWindowHighdpi)
 	rl.InitWindow(1280, 720, "Blockworld")
 	if !rl.IsWindowReady() {
 		fmt.Fprintln(os.Stderr, "blockworld: could not open a window (is the display available and unlocked?)")
