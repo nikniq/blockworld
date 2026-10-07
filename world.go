@@ -100,6 +100,7 @@ type blockInfo struct {
 	Food              int            // health restored when eaten (an item, not a placeable block)
 	Item              bool           // a crafting material that cannot be placed
 	Box               *[2][3]float32 // extents of a Tiny block within its cell (nil: torch size)
+	Cross             bool           // drawn as two crossed quads (plants) instead of a box
 }
 
 var (
@@ -188,7 +189,7 @@ var blocks = [numBlocks]blockInfo{
 	Bed: {Name: "Bed", Top: col(190, 40, 40), Side: col(150, 110, 70), Bottom: col(150, 110, 70),
 		Pat: [3]texPattern{PatBedTop, PatPlanks, PatPlanks}, MineTime: 0.3, Drops: Bed, Tiny: true, Box: &bedBox},
 	Sapling: {Name: "Oak Sapling", Top: col(70, 140, 50), Side: col(70, 140, 50), Bottom: col(90, 70, 40),
-		Pat: [3]texPattern{PatSapling, PatSapling, PatNoise}, MineTime: 0.05, Drops: Sapling, Tiny: true, Box: &saplingBox},
+		Pat: [3]texPattern{PatSapling, PatSapling, PatNoise}, MineTime: 0.05, Drops: Sapling, Tiny: true, Box: &saplingBox, Cross: true},
 	Ladder: {Name: "Ladder", Top: col(160, 120, 70), Side: col(160, 120, 70), Bottom: col(160, 120, 70),
 		Pat: [3]texPattern{PatLadder, PatLadder, PatLadder}, MineTime: 0.3, Drops: Ladder, Tiny: true, Box: &ladderBox},
 	BirchLog: {Name: "Birch Log", Top: col(200, 190, 150), Side: col(225, 225, 215), Bottom: col(200, 190, 150),
@@ -198,17 +199,17 @@ var blocks = [numBlocks]blockInfo{
 	Cactus: {Name: "Cactus", Top: col(90, 150, 60), Side: col(70, 130, 50), Bottom: col(90, 150, 60),
 		Pat: [3]texPattern{PatCactusTop, PatCactus, PatCactusTop}, MineTime: 0.4, Drops: Cactus, Solid: true},
 	TallGrass: {Name: "Tall Grass", Top: col(100, 170, 60), Side: col(100, 170, 60), Bottom: col(100, 170, 60),
-		Pat: [3]texPattern{PatTuft, PatTuft, PatTuft}, MineTime: 0.05, Tiny: true, Box: &plantBox},
+		Pat: [3]texPattern{PatTuft, PatTuft, PatTuft}, MineTime: 0.05, Tiny: true, Box: &plantBox, Cross: true},
 	Flower: {Name: "Flower", Top: col(230, 60, 60), Side: col(230, 60, 60), Bottom: col(230, 60, 60),
-		Pat: [3]texPattern{PatFlower, PatFlower, PatFlower}, MineTime: 0.05, Drops: Flower, Tiny: true, Box: &plantBox},
+		Pat: [3]texPattern{PatFlower, PatFlower, PatFlower}, MineTime: 0.05, Drops: Flower, Tiny: true, Box: &plantBox, Cross: true},
 	Leather: {Name: "Leather", Top: col(150, 95, 55), Side: col(150, 95, 55), Bottom: col(150, 95, 55),
 		Pat: [3]texPattern{PatNoise, PatNoise, PatNoise}, MineTime: 0.1, Drops: Leather, Item: true},
 	Seeds: {Name: "Wheat Seeds", Top: col(120, 190, 80), Side: col(120, 190, 80), Bottom: col(120, 190, 80),
-		Pat: [3]texPattern{PatCrop0, PatCrop0, PatCrop0}, MineTime: 0.05, Drops: Seeds, Tiny: true, Box: &cropBox},
+		Pat: [3]texPattern{PatCrop0, PatCrop0, PatCrop0}, MineTime: 0.05, Drops: Seeds, Tiny: true, Box: &cropBox, Cross: true},
 	WheatGrowing: {Name: "Wheat (growing)", Top: col(110, 180, 70), Side: col(110, 180, 70), Bottom: col(110, 180, 70),
-		Pat: [3]texPattern{PatCrop1, PatCrop1, PatCrop1}, MineTime: 0.05, Drops: Seeds, Tiny: true, Box: &plantBox},
+		Pat: [3]texPattern{PatCrop1, PatCrop1, PatCrop1}, MineTime: 0.05, Drops: Seeds, Tiny: true, Box: &plantBox, Cross: true},
 	Wheat: {Name: "Wheat", Top: col(210, 180, 70), Side: col(210, 180, 70), Bottom: col(210, 180, 70),
-		Pat: [3]texPattern{PatCrop2, PatCrop2, PatCrop2}, MineTime: 0.05, Drops: WheatItem, Tiny: true, Box: &plantBox},
+		Pat: [3]texPattern{PatCrop2, PatCrop2, PatCrop2}, MineTime: 0.05, Drops: WheatItem, Tiny: true, Box: &plantBox, Cross: true},
 	WheatItem: {Name: "Wheat", Top: col(215, 185, 80), Side: col(215, 185, 80), Bottom: col(215, 185, 80),
 		Pat: [3]texPattern{PatCrop2, PatCrop2, PatCrop2}, MineTime: 0.1, Drops: WheatItem, Item: true},
 	Bread: {Name: "Bread", Top: col(200, 150, 80), Side: col(200, 150, 80), Bottom: col(200, 150, 80),
@@ -274,6 +275,7 @@ type Env struct {
 	Fog              rl.Color
 	FogStart, FogEnd float32
 	SunTint          [3]float32 // colour of sunlight (orange at dawn, blue at night)
+	SunDir           rl.Vector3 // toward the sun, for directional face shading
 	Flicker          float32    // torch light wobble around 1
 	Time             float32
 }
@@ -305,6 +307,7 @@ type World struct {
 	locFogE  int32
 	locLight int32
 	locSun   int32
+	locSunD  int32
 	locFlick int32
 	locTile  int32
 	locScrol int32
@@ -1167,6 +1170,32 @@ func biomeTintCode(b Block, f *faceDef, biome Biome) uint8 {
 	return 250 - uint8(biome)
 }
 
+// emitCross draws a plant as two diagonal quads of the given height, both
+// sides, textured with the block's side tile and lit by its own cell.
+func (m *meshBuf) emitCross(b Block, x, y, z, h float32, l cornerLight, tintCode uint8) {
+	u0, v0, u1, v1 := tileUV(b, 1)
+	shade := uint8(230)
+	type quad struct{ ax, az, bx, bz float32 }
+	quads := []quad{{0.15, 0.15, 0.85, 0.85}, {0.15, 0.85, 0.85, 0.15}}
+	for _, q := range quads {
+		for _, flip := range []bool{false, true} {
+			ax, az, bx, bz := q.ax, q.az, q.bx, q.bz
+			if flip {
+				ax, az, bx, bz = bx, bz, ax, az
+			}
+			// Corners: bottom-a, bottom-b, top-b, top-a.
+			pts := [4][3]float32{{x + ax, y, z + az}, {x + bx, y, z + bz}, {x + bx, y + h, z + bz}, {x + ax, y + h, z + az}}
+			uvs := [4][2]float32{{u0, v1}, {u1, v1}, {u1, v0}, {u0, v0}}
+			for _, i := range [6]int{0, 1, 2, 0, 2, 3} {
+				m.verts = append(m.verts, pts[i][0], pts[i][1], pts[i][2])
+				m.norms = append(m.norms, 0, 1, 0)
+				m.uvs = append(m.uvs, uvs[i][0], uvs[i][1])
+				m.cols = append(m.cols, uint8(l.sun*255), uint8(l.blk*255), shade, tintCode)
+			}
+		}
+	}
+}
+
 // setLastFaceAlpha rewrites the alpha of the six vertices just emitted.
 func (m *meshBuf) setLastFaceAlpha(a uint8) {
 	for k := 1; k <= 6; k++ {
@@ -1225,6 +1254,10 @@ func (w *World) buildChunk(ci, cj int, c *chunk) {
 					// Small box lit by its own cell, no culling or occlusion.
 					l := cornerLight{float32(w.sunLocal(lx, y, lz)) / 15, float32(w.blockLocal(lx, y, lz)) / 15}
 					box := b.TinyBox()
+					if info.Cross {
+						c.opaque.emitCross(b, wx, float32(y), wz, box[1][1], l, biomeTintCode(b, &faces[0], w.Biome[lz*worldW+lx]))
+						continue
+					}
 					for fi := range faces {
 						c.opaque.emitFace(&faces[fi], b, wx, float32(y), wz, box, 1, [4]int{3, 3, 3, 3}, [4]cornerLight{l, l, l, l})
 						if code := biomeTintCode(b, &faces[fi], w.Biome[lz*worldW+lx]); code != 255 {
@@ -1345,6 +1378,7 @@ uniform float fogStart;
 uniform float fogEnd;
 uniform float light;
 uniform vec3 sunTint;
+uniform vec3 sunDir;
 uniform float flicker;
 uniform vec4 tileInfo;    // atlas cell size (xy) and the padding offset to the tile inside it (zw), in uv units
 uniform vec2 uvScroll;    // water animation, in tile units (0 for the opaque pass)
@@ -1375,7 +1409,9 @@ void main() {
     if (a < 0.02) discard;
     float sun = fragColor.r * colDiffuse.r * light;
     float blk = fragColor.g * colDiffuse.g * flicker;
-    float bs = 0.03 + 0.97 * sun * sun;
+    // Faces turned toward the sun catch more of it; the effect follows the sun through the day.
+    float facing = 0.88 + 0.24 * max(dot(normalize(fragNormal), sunDir), 0.0);
+    float bs = 0.03 + 0.97 * sun * sun * facing;
     float bb = 0.97 * blk * blk;
     vec3 torchTint = vec3(1.0, 0.82, 0.58);
     vec3 lit = max(sunTint * bs, torchTint * bb);
@@ -1436,6 +1472,7 @@ func (w *World) initGPU() {
 		w.locFogE = rl.GetShaderLocation(w.shader, "fogEnd")
 		w.locLight = rl.GetShaderLocation(w.shader, "light")
 		w.locSun = rl.GetShaderLocation(w.shader, "sunTint")
+		w.locSunD = rl.GetShaderLocation(w.shader, "sunDir")
 		w.locFlick = rl.GetShaderLocation(w.shader, "flicker")
 		w.locTile = rl.GetShaderLocation(w.shader, "tileInfo")
 		w.locScrol = rl.GetShaderLocation(w.shader, "uvScroll")
@@ -1491,6 +1528,7 @@ func (w *World) SetEnv(cam rl.Camera3D, env Env) {
 	rl.SetShaderValue(w.shader, w.locFogE, []float32{env.FogEnd}, rl.ShaderUniformFloat)
 	rl.SetShaderValue(w.shader, w.locLight, []float32{env.Light}, rl.ShaderUniformFloat)
 	rl.SetShaderValue(w.shader, w.locSun, env.SunTint[:], rl.ShaderUniformVec3)
+	rl.SetShaderValue(w.shader, w.locSunD, []float32{env.SunDir.X, env.SunDir.Y, env.SunDir.Z}, rl.ShaderUniformVec3)
 	rl.SetShaderValue(w.shader, w.locFlick, []float32{env.Flicker}, rl.ShaderUniformFloat)
 	rl.SetShaderValue(w.shader, w.locScrol, []float32{0, 0}, rl.ShaderUniformVec2)
 	rl.SetShaderValue(w.shader, w.locWater, []float32{0}, rl.ShaderUniformFloat)

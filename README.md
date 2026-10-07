@@ -79,6 +79,9 @@ block textures and sound effects are generated at startup.
   pitch black and nights are dim. Craft **torches** (coal ore + planks) and place them anywhere to light
   your mine or base. Hostiles and dropped items are lit by the cell they stand in.
 - Textured blocks with ambient occlusion and smooth lighting, fog, drifting clouds, stars and a sun and moon.
+  The scene is anti-aliased with an FXAA pass and finished with a soft vignette (A on the pause screen
+  toggles it). Plants are crossed quads rather than boxes, faces brighten as they turn toward the sun
+  through the day, broken blocks shatter into textured chips, and the held block is a real cube in hand.
   Grass and leaves take on the colour of their biome (lush forest, dry desert, cool taiga), textures are
   mipmapped so distant terrain does not shimmer, and the view fades into fog about 190 blocks out.
   Torchlight is warm and flickers, sunlight turns orange at dawn and dusk and blue at night, water ripples

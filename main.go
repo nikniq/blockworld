@@ -50,10 +50,12 @@ type Tracer struct {
 }
 
 type Spark struct {
-	Pos  rl.Vector3
-	Vel  rl.Vector3
-	Life float32
-	Col  rl.Color
+	Pos   rl.Vector3
+	Vel   rl.Vector3
+	Life  float32
+	Col   rl.Color
+	Block Block // textured debris when set
+	Spin  float32
 }
 
 type Game struct {
@@ -642,7 +644,16 @@ func (g *Game) blast(pos rl.Vector3, r, dmg float32) {
 func (g *Game) burst(pos rl.Vector3, col rl.Color, n int) {
 	for i := 0; i < n; i++ {
 		v := rl.NewVector3(rand.Float32()*2-1, rand.Float32()*2, rand.Float32()*2-1)
-		g.Sparks = append(g.Sparks, Spark{pos, rl.Vector3Scale(v, 3), 0.3 + rand.Float32()*0.2, col})
+		g.Sparks = append(g.Sparks, Spark{Pos: pos, Vel: rl.Vector3Scale(v, 3), Life: 0.3 + rand.Float32()*0.2, Col: col})
+	}
+}
+
+// burstBlock throws textured chips of a block.
+func (g *Game) burstBlock(pos rl.Vector3, b Block, n int) {
+	for i := 0; i < n; i++ {
+		v := rl.NewVector3(rand.Float32()*2-1, rand.Float32()*2.5, rand.Float32()*2-1)
+		off := rl.NewVector3(rand.Float32()-0.5, rand.Float32()-0.5, rand.Float32()-0.5)
+		g.Sparks = append(g.Sparks, Spark{Pos: rl.Vector3Add(pos, rl.Vector3Scale(off, 0.6)), Vel: rl.Vector3Scale(v, 2.5), Life: 0.5 + rand.Float32()*0.3, Block: b, Spin: rand.Float32() * 6})
 	}
 }
 
@@ -837,9 +848,9 @@ func (g *Game) breakBlock(x, y, z int) {
 		g.Audio.Play(g.Audio.Clear, 0.7)
 		g.unlock(AchDungeon)
 	}
-	g.burst(centre, info.Side, 12)
+	g.burstBlock(centre, b, 14)
 	g.Audio.Play(g.Audio.Dig, 0.8)
-	g.sendFx(Fx{Kind: FxDig, Pos: centre, Color: info.Side, N: 12})
+	g.sendFx(Fx{Kind: FxDig, Pos: centre, Color: info.Side, N: 12, Block: b})
 	g.settle(x, y+1, z)
 }
 
@@ -1400,7 +1411,7 @@ func (g *Game) worldUpdate(dt float32) {
 			e.BurnT += dt
 			if e.BurnT >= 0.7 {
 				e.BurnT = 0
-				g.Sparks = append(g.Sparks, Spark{rl.NewVector3(e.Pos.X, e.Pos.Y+e.Spec.Height, e.Pos.Z), rl.NewVector3(0, 2, 0), 0.4, rl.Orange})
+				g.Sparks = append(g.Sparks, Spark{Pos: rl.NewVector3(e.Pos.X, e.Pos.Y+e.Spec.Height, e.Pos.Z), Vel: rl.NewVector3(0, 2, 0), Life: 0.4, Col: rl.Orange})
 				if e.Hit(1) {
 					g.killEnemy(e, e.Spec.Points/4)
 				}
@@ -1472,7 +1483,13 @@ func (g *Game) tickEffects(dt float32) {
 	for _, s := range g.Sparks {
 		s.Life -= dt
 		s.Vel.Y -= 9 * dt
-		s.Pos = rl.Vector3Add(s.Pos, rl.Vector3Scale(s.Vel, dt))
+		s.Spin += dt * 4
+		next := rl.Vector3Add(s.Pos, rl.Vector3Scale(s.Vel, dt))
+		if s.Block != Air && g.World.Solid(floorI(next.X), floorI(next.Y), floorI(next.Z)) {
+			s.Vel = rl.NewVector3(s.Vel.X*0.5, 0, s.Vel.Z*0.5) // chips settle on the ground
+		} else {
+			s.Pos = next
+		}
 		if s.Life > 0 {
 			sp = append(sp, s)
 		}
@@ -1604,10 +1621,36 @@ func (g *Game) draw3D() {
 	}
 	g.drawBolt()
 	for _, s := range g.Sparks {
+		if s.Block != Air {
+			m := rl.MatrixMultiply(rl.MatrixMultiply(rl.MatrixScale(0.12, 0.12, 0.12), rl.MatrixRotateY(s.Spin)), rl.MatrixTranslate(s.Pos.X, s.Pos.Y, s.Pos.Z))
+			w.DrawBlockAt(s.Block, m)
+			continue
+		}
 		rl.DrawCube(s.Pos, 0.1, 0.1, 0.1, rl.Fade(s.Col, s.Life*3))
 	}
 	w.DrawTranslucent(cam)
+	g.drawHeldBlock(cam)
 	rl.EndMode3D()
+}
+
+// drawHeldBlock renders the selected block as a real cube in the player's hand.
+func (g *Game) drawHeldBlock(cam rl.Camera3D) {
+	p := g.Player
+	if g.ThirdPerson || (p.Held.Kind != ItemBlock && p.Held.Kind != ItemFood) {
+		return
+	}
+	fwd := p.Forward()
+	right := p.Right()
+	up := rl.Vector3CrossProduct(right, fwd)
+	swing := float32(math.Sin(float64(p.Swing * math.Pi)))
+	bob := float32(math.Sin(float64(p.BobPhase))) * 0.02 * p.BobAmount
+	pos := rl.Vector3Add(cam.Position, rl.Vector3Scale(fwd, 0.75-swing*0.15))
+	pos = rl.Vector3Add(pos, rl.Vector3Scale(right, 0.42+bob))
+	pos = rl.Vector3Add(pos, rl.Vector3Scale(up, -0.34-swing*0.12+bob))
+	m := rl.MatrixMultiply(rl.MatrixMultiply(rl.MatrixScale(0.3, 0.3, 0.3), rl.MatrixRotateY(p.Yaw+0.45)), rl.MatrixTranslate(pos.X, pos.Y, pos.Z))
+	rl.DisableDepthTest()
+	g.World.DrawBlockAt(p.Held.Block, m)
+	rl.EnableDepthTest()
 }
 
 // drawShadows puts a soft dark blob under every creature so it reads as standing on the ground.
@@ -1702,7 +1745,7 @@ func (g *Game) spawnEmbers() {
 		z := floorI(p.Pos.Z) + rand.Intn(25) - 12
 		if w.Get(x, y, z) == Lava && w.Get(x, y+1, z) == Air && rand.Float32() < 0.25 {
 			pos := rl.NewVector3(float32(x)+rand.Float32(), float32(y)+0.95, float32(z)+rand.Float32())
-			g.Sparks = append(g.Sparks, Spark{pos, rl.NewVector3(rand.Float32()-0.5, 2.5+rand.Float32()*2, rand.Float32()-0.5), 0.5 + rand.Float32()*0.4, rl.NewColor(255, 150+uint8(rand.Intn(80)), 30, 255)})
+			g.Sparks = append(g.Sparks, Spark{Pos: pos, Vel: rl.NewVector3(rand.Float32()-0.5, 2.5+rand.Float32()*2, rand.Float32()-0.5), Life: 0.5 + rand.Float32()*0.4, Col: rl.NewColor(255, 150+uint8(rand.Intn(80)), 30, 255)})
 		}
 	}
 }
@@ -1756,15 +1799,11 @@ func (g *Game) drawWeapon() {
 	swing := float32(math.Sin(float64(p.Swing * math.Pi)))
 	switch p.Held.Kind {
 	case ItemBlock, ItemFood:
+		// The block itself is drawn in 3D (drawHeldBlock); only the arm is 2D.
 		rx := sw*0.68 + bobX - swing*12
 		ry := sh - 170 + bobY + swing*40
-		rl.DrawRectangle(int32(rx+40), int32(ry+40), 90, 220, skin)
-		rl.DrawRectangle(int32(rx+40), int32(ry+40), 90, 220, rl.Fade(rl.Black, 0.15))
-		tex := g.World.Atlas()
-		b := p.Held.Block
-		rl.DrawTexturePro(tex, TileRect(b, 1), rl.NewRectangle(rx, ry, 130, 130), rl.Vector2{}, 0, rl.White)
-		rl.DrawTexturePro(tex, TileRect(b, 0), rl.NewRectangle(rx, ry-34, 130, 34), rl.Vector2{}, 0, rl.NewColor(255, 255, 255, 255))
-		rl.DrawRectangleLines(int32(rx), int32(ry-34), 130, 164, rl.NewColor(0, 0, 0, 160))
+		rl.DrawRectangle(int32(rx+60), int32(ry+70), 90, 220, skin)
+		rl.DrawRectangle(int32(rx+60), int32(ry+70), 90, 220, rl.Fade(rl.Black, 0.15))
 		return
 	case ItemBow:
 		rx := sw*0.70 + bobX
@@ -2239,6 +2278,8 @@ func (g *Game) updateSettings() {
 		settings.SwapButtons = !settings.SwapButtons
 	case rl.IsKeyPressed(rl.KeyD):
 		settings.Difficulty = (settings.Difficulty + 1) % 3
+	case rl.IsKeyPressed(rl.KeyA):
+		settings.Antialias = !settings.Antialias
 	case rl.IsKeyPressed(rl.KeyN):
 		settings.Music = !settings.Music
 		if !settings.Music && g.Audio.ok {
@@ -2330,7 +2371,11 @@ func (g *Game) drawOverlay() {
 		if settings.Music {
 			music = "on"
 		}
-		centered(fmt.Sprintf("N  music  %s        K (in game)  achievements %d/%d", music, g.achievementCount(), int(numAch)), sh/2+226, 20, rl.White)
+		aa := "off"
+		if settings.Antialias {
+			aa = "on"
+		}
+		centered(fmt.Sprintf("N  music  %s      A  anti-aliasing  %s      K (in game)  achievements %d/%d", music, aa, g.achievementCount(), int(numAch)), sh/2+226, 20, rl.White)
 	case StateGameOver:
 		centered("YOU DIED", sh/2-120, 64, rl.Red)
 		if g.Player.Cause != "" {
@@ -3010,8 +3055,12 @@ func main() {
 		g.updateMusic()
 
 		rl.BeginDrawing()
+		usePost := settings.Antialias && postfx.begin()
 		rl.ClearBackground(g.Sky.Color())
 		g.draw3D()
+		if usePost {
+			postfx.end()
+		}
 		switch g.State {
 		case StatePlaying:
 			g.drawHUD()

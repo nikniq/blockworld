@@ -113,6 +113,7 @@ type Fx struct {
 	N     int
 	Text  string
 	Shake float32
+	Block Block
 }
 
 // Msg carries exactly one payload; nil fields are omitted by gob.
@@ -698,7 +699,11 @@ func (g *Game) clientHandle(m *Msg) {
 				g.Audio.Play(g.Audio.Explode, 1)
 			}
 		case FxDig:
-			g.burst(fx.Pos, fx.Color, fx.N)
+			if fx.Block != Air {
+				g.burstBlock(fx.Pos, fx.Block, fx.N)
+			} else {
+				g.burst(fx.Pos, fx.Color, fx.N)
+			}
 			if rl.Vector3Distance(fx.Pos, p.Pos) < 20 {
 				g.Audio.Play(g.Audio.Dig, 0.5)
 			}
