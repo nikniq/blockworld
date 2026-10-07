@@ -22,6 +22,7 @@ const (
 	fireInterval = 0.16
 	reloadTime   = 1.4
 	maxHealth    = 100
+	maxHunger    = 20
 	startReserve = 36
 	reachDist    = 5.5 // how far blocks can be mined or placed
 	swordCD      = 0.45
@@ -65,6 +66,8 @@ type Player struct {
 	CactusT   float32
 	StepDist  float32 // distance walked since the last footstep
 	Stepped   bool    // a footstep landed this frame (the game plays the sound)
+	Hunger    float32 // 0..20, drains with time and effort
+	StarveT   float32
 	Flying    bool    // creative flight
 	JumpTapT  float32 // seconds since the last jump press (double tap toggles flight)
 	Sneak     bool
@@ -107,6 +110,7 @@ func NewPlayer(pos rl.Vector3) *Player {
 		Reserve:   startReserve,
 		SwordTier: TierWood,
 		PickTier:  TierWood,
+		Hunger:    maxHunger,
 		Held:      Item{Kind: ItemPickaxe},
 	}
 	p.Inv[Planks] = 16
@@ -317,6 +321,9 @@ func (p *Player) Update(dt float32, w *World) {
 	moving := rl.Vector3Length(move) > 0
 	p.Sneak = rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift)
 	p.Sprinting = !p.Sneak && moving && rl.IsKeyDown(rl.KeyW) && (rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl) || rl.IsKeyDown(rl.KeyLeftSuper))
+	if p.Hunger <= 6 && !settings.Creative {
+		p.Sprinting = false // too hungry to run
+	}
 	speed := float32(walkSpeed)
 	if p.Sneak {
 		speed = sneakSpeed
@@ -470,12 +477,44 @@ func (p *Player) Update(dt float32, w *World) {
 	p.DmgFlash = max(0, p.DmgFlash-dt*2)
 	p.Swing = max(0, p.Swing-dt*4)
 	p.SinceHurt += dt
-	// Slow natural regeneration once out of combat for a while.
-	if p.SinceHurt > 6 && p.HP < maxHealth {
+	// Hunger drains with time and effort; a full stomach heals, an empty one hurts.
+	if !settings.Creative {
+		drain := float32(0.03)
+		if p.Sprinting {
+			drain += 0.12
+		}
+		if moving {
+			drain += 0.02
+		}
+		if p.InWater {
+			drain += 0.03
+		}
+		p.Hunger = clamp(p.Hunger-drain*dt, 0, maxHunger)
+	} else {
+		p.Hunger = maxHunger
+	}
+	if p.Hunger <= 0 {
+		p.StarveT += dt
+		if p.StarveT >= 4 {
+			p.StarveT = 0
+			if p.HP > 1 {
+				p.Hurt(1, "starved", false)
+			}
+		}
+	} else {
+		p.StarveT = 0
+	}
+	// Slow natural regeneration once out of combat for a while and fed.
+	if p.SinceHurt > 6 && p.HP < maxHealth && p.Hunger >= 12 {
 		p.RegenT += dt
-		if p.RegenT >= 2.5 {
+		rate := float32(2.5)
+		if p.Hunger >= 18 {
+			rate = 1.2
+		}
+		if p.RegenT >= rate {
 			p.RegenT = 0
 			p.HP++
+			p.Hunger -= 0.15
 		}
 	}
 	if p.Reloading > 0 {

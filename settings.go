@@ -21,6 +21,7 @@ type Settings struct {
 	LastJoin    string
 	Name        string // player name shown to others
 	Creative    bool   // creative mode: fly, build freely, take no damage
+	Music       bool
 }
 
 var difficultyNames = [...]string{"Peaceful", "Normal", "Hard"}
@@ -29,7 +30,9 @@ var difficultyNames = [...]string{"Peaceful", "Normal", "Hard"}
 func hostileScale() float32 { return [...]float32{0, 1, 1.5}[settings.Difficulty] }
 func damageScale() float32  { return [...]float32{0.5, 1, 1.5}[settings.Difficulty] }
 
-func defaultSettings() Settings { return Settings{Sensitivity: 1, Volume: 0.8, Difficulty: 1} }
+func defaultSettings() Settings {
+	return Settings{Sensitivity: 1, Volume: 0.8, Difficulty: 1, Music: true}
+}
 
 func settingsPath() string {
 	dir, err := os.UserConfigDir()
@@ -75,6 +78,8 @@ func loadSettings() Settings {
 			s.Name = v
 		case "creative":
 			s.Creative = v == "true"
+		case "music":
+			s.Music = v == "true"
 		case "difficulty":
 			if n, err := strconv.Atoi(v); err == nil && n >= 0 && n <= 2 {
 				s.Difficulty = n
@@ -92,7 +97,7 @@ func (s Settings) save() {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return
 	}
-	text := fmt.Sprintf("sensitivity=%.2f\nvolume=%.2f\ninvert_y=%t\nfullscreen=%t\nswap_buttons=%t\ndifficulty=%d\nlast_join=%s\nname=%s\ncreative=%t\n", s.Sensitivity, s.Volume, s.InvertY, s.Fullscreen, s.SwapButtons, s.Difficulty, s.LastJoin, s.Name, s.Creative)
+	text := fmt.Sprintf("sensitivity=%.2f\nvolume=%.2f\ninvert_y=%t\nfullscreen=%t\nswap_buttons=%t\ndifficulty=%d\nlast_join=%s\nname=%s\ncreative=%t\nmusic=%t\n", s.Sensitivity, s.Volume, s.InvertY, s.Fullscreen, s.SwapButtons, s.Difficulty, s.LastJoin, s.Name, s.Creative, s.Music)
 	_ = os.WriteFile(p, []byte(text), 0o644)
 }
 
@@ -111,6 +116,8 @@ func useButton() rl.MouseButton {
 	return rl.MouseButtonRight
 }
 
-func attackDown() bool    { return rl.IsMouseButtonDown(attackButton()) }
+var forceAttack bool // test harness: pretend the attack button is held
+
+func attackDown() bool    { return forceAttack || rl.IsMouseButtonDown(attackButton()) }
 func attackPressed() bool { return rl.IsMouseButtonPressed(attackButton()) }
 func usePressed() bool    { return rl.IsMouseButtonPressed(useButton()) }

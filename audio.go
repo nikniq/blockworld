@@ -33,6 +33,7 @@ type Audio struct {
 	Splash   rl.Sound
 	Eat      rl.Sound
 	Groan    rl.Sound
+	Music    rl.Sound // generated ambient loop
 	Rain     rl.Sound
 	Rattle   rl.Sound
 	Steps    [4]rl.Sound // grass, stone, sand, wood
@@ -120,6 +121,7 @@ func NewAudio() *Audio {
 		env := float32(math.Sin(float64(t * math.Pi)))
 		return noise() * 0.25 * (0.4 + 0.6*env)
 	})
+	a.Music = a.synthMusic()
 	a.Groan = a.synth(0.9, func(t float32) float32 {
 		f := 95 - 25*t
 		return (saw(f, t)*0.5 + sin(f*2.01, t)*0.3 + noise()*0.1) * float32(math.Sin(float64(t/0.9*math.Pi))) * 0.6
@@ -134,6 +136,44 @@ func NewAudio() *Audio {
 	a.Steps[3] = a.synth(0.08, func(t float32) float32 { return (sin(210, t)*0.6 + noise()*0.3) * exp(50, t) * 0.5 })
 	a.Splash = a.synth(0.35, func(t float32) float32 { return (noise()*0.6 + sin(300-200*t, t)*0.4) * exp(9, t) * 0.7 })
 	return a
+}
+
+// synthMusic composes a gentle 32-second pentatonic loop: a soft lead with a
+// slow bass, enough to give the world an atmosphere without any asset files.
+func (a *Audio) synthMusic() rl.Sound {
+	scale := []float32{261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25}
+	const beat = 0.5
+	const bars = 64
+	notes := make([]float32, bars)
+	idx := 3
+	seed := uint32(20240)
+	next := func() uint32 { seed = seed*1664525 + 1013904223; return seed >> 8 }
+	for i := range notes {
+		step := int(next()%5) - 2
+		idx = max(0, min(len(scale)-1, idx+step))
+		if next()%4 == 0 {
+			notes[i] = 0 // rest
+		} else {
+			notes[i] = scale[idx]
+		}
+	}
+	bass := []float32{130.81, 130.81, 98.00, 110.00}
+	dur := float32(bars) * beat
+	return a.synth(dur, func(t float32) float32 {
+		i := int(t / beat)
+		if i >= bars {
+			i = bars - 1
+		}
+		nt := t - float32(i)*beat
+		v := float32(0)
+		if f := notes[i]; f > 0 {
+			env := float32(math.Exp(-float64(nt*3))) * float32(math.Min(1, float64(nt*40)))
+			v += (float32(math.Sin(2*math.Pi*float64(f*t))) + 0.3*float32(math.Sin(4*math.Pi*float64(f*t)))) * env * 0.18
+		}
+		b := bass[(i/8)%len(bass)]
+		v += float32(math.Sin(2*math.Pi*float64(b*t))) * 0.07 * (0.6 + 0.4*float32(math.Sin(float64(t*0.5))))
+		return v
+	})
 }
 
 // synth renders fn over dur seconds into a 16-bit mono sound.

@@ -27,6 +27,7 @@ var recipes = []Recipe{
 	{Name: "Oak Planks x4", Out: Planks, Count: 4, In: []Ingredient{{Log, 1}}},
 	{Name: "Planks x4 (birch)", Out: Planks, Count: 4, In: []Ingredient{{BirchLog, 1}}},
 	{Name: "Torch x4", Out: Torch, Count: 4, In: []Ingredient{{CoalOre, 1}, {Planks, 1}}},
+	{Name: "Cooked Meat x2", Out: CookedMeat, Count: 2, In: []Ingredient{{Meat, 2}, {CoalOre, 1}}},
 	{Name: "TNT", Out: TNT, Count: 1, In: []Ingredient{{Sand, 4}, {CoalOre, 4}}},
 	{Name: "Ladder x4", Out: Ladder, Count: 4, In: []Ingredient{{Planks, 2}}},
 	{Name: "Bed", Out: Bed, Count: 1, In: []Ingredient{{Planks, 3}, {Wool, 3}}},

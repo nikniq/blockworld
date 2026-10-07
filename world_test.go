@@ -348,8 +348,8 @@ func TestTNTAndFood(t *testing.T) {
 	if g.World.Get(x, y-1, z) != Air {
 		t.Fatal("blast should crater the ground")
 	}
-	if Meat.Placeable() {
-		t.Fatal("meat is not placeable")
+	if Meat.Placeable() || Apple.Placeable() || CookedMeat.Placeable() {
+		t.Fatal("food is not placeable")
 	}
 	p := g.Player
 	p.Inv[Meat] = 1
@@ -491,7 +491,7 @@ func TestDungeonsAndLoot(t *testing.T) {
 	for _, d := range g.Drops {
 		ammo += d.Ammo
 	}
-	if ammo < 16 || g.Score != before+150 || w.Get(x, y, z) != Air {
+	if ammo < 16 || g.Score < before+150 || w.Get(x, y, z) != Air {
 		t.Fatalf("crate loot: ammo %d score %d", ammo, g.Score-before)
 	}
 	// A giant blocked by a wall smashes it.

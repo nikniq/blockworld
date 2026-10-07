@@ -82,6 +82,11 @@ type Game struct {
 	JoinErr        string
 	JoinField      int  // 0 address, 1 name
 	Headless       bool // dedicated server: no window, no local player
+	Got            [numAch]bool
+	Toasts         []Toast
+	MinedCount     int
+	PlacedCount    int
+	ShowAch        bool
 	lastLogged     string
 	Chat           []ChatLine
 	ChatText       string
@@ -120,7 +125,7 @@ type Game struct {
 }
 
 func NewGame() *Game {
-	g := &Game{Audio: NewAudio(), HighScore: loadHighScore(), CraftHover: -1, Remotes: map[uint32]*RemotePlayer{}}
+	g := &Game{Audio: NewAudio(), HighScore: loadHighScore(), CraftHover: -1, Remotes: map[uint32]*RemotePlayer{}, Got: loadAchievements()}
 	g.Reset()
 	g.State = StateMenu
 	return g
@@ -217,6 +222,12 @@ func (g *Game) dawn() {
 	}
 	bonus := 400 * g.Night
 	g.Score += bonus
+	if g.Night >= 1 {
+		g.unlock(AchFirstNight)
+	}
+	if g.Night >= 5 {
+		g.unlock(AchNightFive)
+	}
 	g.SpawnLeft = 0
 	g.announce(fmt.Sprintf("You survived night %d!  +%d", g.Night, bonus), 3.5)
 	if g.isHost() {
@@ -297,6 +308,7 @@ func (g *Game) killEnemyRaw(e *Enemy) {
 		}
 	case KindCreeper:
 		g.spawnDrop(c, CoalOre, 0)
+		g.unlock(AchCreeper)
 	case KindBrute:
 		g.spawnDrop(c, 0, 12)
 		g.spawnDrop(c, IronOre, 0)
@@ -310,6 +322,7 @@ func (g *Game) killEnemyRaw(e *Enemy) {
 		}
 		g.spawnDrop(c, 0, 24)
 		g.announce("GIANT SLAIN  +1500", 3)
+		g.unlock(AchGiant)
 	}
 }
 
@@ -663,14 +676,16 @@ func (g *Game) settle(x, y, z int) {
 func (g *Game) updateBuilder(dt float32) {
 	p, w := g.Player, g.World
 	if usePressed() && p.Held.Kind == ItemFood && p.Inv[p.Held.Block] > 0 {
-		if p.HP < maxHealth {
+		if p.Hunger < maxHunger-0.5 || p.HP < maxHealth {
 			p.Inv[p.Held.Block]--
-			heal := blocks[p.Held.Block].Food
-			p.HP = min(maxHealth, p.HP+heal)
+			food := blocks[p.Held.Block].Food
+			p.Hunger = clamp(p.Hunger+float32(food), 0, maxHunger)
+			p.HP = min(maxHealth, p.HP+food)
 			p.Swing = 1
-			g.say(fmt.Sprintf("+%d HEALTH", heal), 1)
+			g.say(fmt.Sprintf("+%d FOOD", food), 1)
 			g.Audio.Play(g.Audio.Eat, 0.7)
 			p.EnsureHeld()
+			g.unlock(AchEat)
 		}
 	}
 	p.Aim = w.RayCastAny(p.Eye(), p.Forward(), reachDist)
@@ -740,6 +755,7 @@ func (g *Game) updateBuilder(dt float32) {
 			if !settings.Creative {
 				p.Inv[p.Held.Block]--
 			}
+			g.PlacedCount++
 			p.Swing = 1
 			g.Audio.Play(g.Audio.Place, 0.7)
 			p.EnsureHeld()
@@ -762,6 +778,13 @@ func (g *Game) breakBlock(x, y, z int) {
 	if b == Leaves && rand.Float32() < 0.15 {
 		g.spawnDrop(centre, Sapling, 0)
 	}
+	if b == Leaves && rand.Float32() < 0.06 {
+		g.spawnDrop(centre, Apple, 0)
+	}
+	if !g.Headless && !g.isClient() {
+		g.MinedCount++
+		g.unlock(AchFirstBlock)
+	}
 	switch b {
 	case Crate:
 		g.spawnDrop(centre, 0, 16)
@@ -778,6 +801,7 @@ func (g *Game) breakBlock(x, y, z int) {
 		g.spawnDrop(centre, DiamondOre, 0)
 		g.say("Spawner destroyed  +500", 2)
 		g.Audio.Play(g.Audio.Clear, 0.7)
+		g.unlock(AchDungeon)
 	}
 	g.burst(centre, info.Side, 12)
 	g.Audio.Play(g.Audio.Dig, 0.8)
@@ -957,6 +981,7 @@ func (g *Game) updateSleep(dt float32) {
 			g.WasNight = false
 			g.SpawnLeft = 0
 			g.say(fmt.Sprintf("Day %d  -  you slept through the night", g.Sky.Day), 3)
+			g.unlock(AchSleep)
 		}
 	}
 }
@@ -1183,6 +1208,11 @@ func (g *Game) update(dt float32) {
 		g.Chatting = true
 		g.ChatText = ""
 	}
+	if rl.IsKeyPressed(rl.KeyK) {
+		g.ShowAch = !g.ShowAch
+	}
+	g.checkAchievements()
+	g.updateToasts(dt)
 	g.RainCD -= dt
 	if g.Sky.Rain > 0.1 && g.RainCD <= 0 && g.World.SkyExposed(p.Eye()) {
 		g.RainCD = 0.85
@@ -1492,9 +1522,9 @@ func (g *Game) draw3D() {
 		c := rl.NewVector3(float32(p.Aim.X)+0.5, float32(p.Aim.Y)+0.5, float32(p.Aim.Z)+0.5)
 		rl.DrawCubeWires(c, 1.005, 1.005, 1.005, rl.NewColor(0, 0, 0, 200))
 		if p.Mining {
-			if need := p.MineTime(w.Get(p.Aim.X, p.Aim.Y, p.Aim.Z)); need > 0 {
+			if need := p.MineTime(w.Get(p.Aim.X, p.Aim.Y, p.Aim.Z)); need > 0.2 {
 				frac := clamp(p.MineT/need, 0, 1)
-				rl.DrawCube(c, 1.01, 1.01, 1.01, rl.Fade(rl.Black, frac*0.55))
+				skins.DrawCrack(w, p.Aim.X, p.Aim.Y, p.Aim.Z, int(frac*crackStages))
 			}
 		}
 	}
@@ -1738,15 +1768,31 @@ func (g *Game) drawHUD() {
 		}
 	}
 	rl.DrawText(fmt.Sprintf("%d", p.HP), hx+10*26+4, hy, 20, rl.White)
+	// Hunger: ten drumsticks, two points each, in a row above the hearts.
+	fy := hy - 34
+	rl.DrawRectangle(hx-8, fy-6, 10*22+16, 30, rl.NewColor(0, 0, 0, 140))
+	for i := 0; i < 10; i++ {
+		x := hx + int32(i)*22
+		full := p.Hunger - float32(i*2)
+		c := rl.NewColor(60, 40, 30, 255)
+		if full >= 2 {
+			c = rl.NewColor(200, 130, 60, 255)
+		} else if full >= 1 {
+			c = rl.NewColor(150, 100, 50, 255)
+		}
+		rl.DrawCircle(x+8, fy+6, 6, c)
+		rl.DrawRectangle(x+6, fy+8, 5, 11, mul(c, 0.8))
+	}
+	rl.DrawText(fmt.Sprintf("%d", int(p.Hunger+0.5)), hx+10*22+12, fy+2, 16, rl.White)
 	if p.Sneak {
-		rl.DrawText("SNEAKING", hx, hy-30, 16, rl.LightGray)
+		rl.DrawText("SNEAKING", hx, hy-62, 16, rl.LightGray)
 	}
 	if settings.Creative {
 		label := "CREATIVE"
 		if p.Flying {
 			label = "CREATIVE  -  FLYING"
 		}
-		rl.DrawText(label, hx, hy-30, 16, rl.SkyBlue)
+		rl.DrawText(label, hx, hy-62, 16, rl.SkyBlue)
 	}
 
 	// Ammo.
@@ -1824,6 +1870,10 @@ func (g *Game) drawHUD() {
 	if g.ShowMap {
 		g.drawFullMap(sw, sh)
 	}
+	if g.ShowAch {
+		g.drawAchievementList(sw, sh)
+	}
+	g.drawToasts(sw)
 	if g.ShowHelp {
 		g.drawHelp(sw, sh)
 	} else {
@@ -1879,7 +1929,9 @@ func (g *Game) drawHelp(sw, sh int32) {
 		"E crafting   R reload   F5 third person   F11 fullscreen   ESC pause and settings",
 		"Torches keep hostiles from rising nearby. Undead burn at sunrise. Creepers explode.",
 		"Beds set your spawn point and skip the night. Dying drops your items where you fell.",
+		"Hunger drains as you move; eat meat and apples (right click). Cook meat with coal (E). Full stomach heals.",
 		"Online: T chat   P player list      Creative mode (G in pause): fly with double-tap SPACE, build freely",
+		"K achievements   N (pause) music on/off",
 		"H closes this help",
 	}
 	w := int32(760)
@@ -1994,6 +2046,11 @@ func (g *Game) updateSettings() {
 		settings.SwapButtons = !settings.SwapButtons
 	case rl.IsKeyPressed(rl.KeyD):
 		settings.Difficulty = (settings.Difficulty + 1) % 3
+	case rl.IsKeyPressed(rl.KeyN):
+		settings.Music = !settings.Music
+		if !settings.Music && g.Audio.ok {
+			rl.StopSound(g.Audio.Music)
+		}
 	case rl.IsKeyPressed(rl.KeyG):
 		settings.Creative = !settings.Creative
 		if !settings.Creative {
@@ -2070,6 +2127,11 @@ func (g *Game) drawOverlay() {
 			mode = "Creative  (double-tap SPACE to fly, SHIFT descends)"
 		}
 		centered("G  game mode  "+mode, sh/2+200, 20, rl.White)
+		music := "off"
+		if settings.Music {
+			music = "on"
+		}
+		centered(fmt.Sprintf("N  music  %s        K (in game)  achievements %d/%d", music, g.achievementCount(), int(numAch)), sh/2+226, 20, rl.White)
 	case StateGameOver:
 		centered("YOU DIED", sh/2-120, 64, rl.Red)
 		if g.Player.Cause != "" {
@@ -2237,6 +2299,29 @@ func (g *Game) drawPlayerList(sw, sh int32) {
 	}
 }
 
+// updateMusic keeps the ambient loop playing while in a world, lower at night.
+func (g *Game) updateMusic() {
+	if !g.Audio.ok {
+		return
+	}
+	playing := g.State == StatePlaying || g.State == StateCrafting || g.State == StatePaused
+	if !settings.Music || !playing {
+		if rl.IsSoundPlaying(g.Audio.Music) {
+			rl.StopSound(g.Audio.Music)
+		}
+		return
+	}
+	if !rl.IsSoundPlaying(g.Audio.Music) {
+		pitch := float32(1)
+		if g.Sky.IsNight() {
+			pitch = 0.88
+		}
+		rl.SetSoundPitch(g.Audio.Music, pitch)
+		rl.SetSoundVolume(g.Audio.Music, 0.5*settings.Volume)
+		rl.PlaySound(g.Audio.Music)
+	}
+}
+
 // hostFromMenu hosts the saved world (or a new one) on the default port.
 func (g *Game) hostFromMenu() {
 	g.Net = &Net{Name: playerName}
@@ -2365,6 +2450,7 @@ func (g *Game) scriptedShots(frame int) bool {
 	case 130:
 		g.Player.Pitch = -0.15
 		g.ThirdPerson = true
+		g.Player.Hunger = 13
 		g.ShowHelp = false
 		g.Sky.Raining, g.Sky.Rain = false, 0
 		g.Player.ArmorTier = 2
@@ -2372,7 +2458,16 @@ func (g *Game) scriptedShots(frame int) bool {
 		rl.TakeScreenshot("shot_third.png")
 	case 145:
 		g.ThirdPerson = false
+		g.Player.Held = Item{Kind: ItemPickaxe}
+		g.Player.Pitch = -0.6
+	case 146:
+		forceAttack = true
+	case 151:
+		forceAttack = false
 	case 150:
+		if a := g.Player.Aim; a.Hit {
+			g.Player.MineT = g.Player.MineTime(g.World.Get(a.X, a.Y, a.Z)) * 0.6
+		}
 		rl.TakeScreenshot("shot_day.png")
 	case 160:
 		g.Sky.T = 0.72
@@ -2649,6 +2744,7 @@ func main() {
 			}
 		}
 		g.refreshMinimap(dt)
+		g.updateMusic()
 
 		rl.BeginDrawing()
 		rl.ClearBackground(g.Sky.Color())

@@ -44,6 +44,8 @@ const (
 	Torch
 	TNT
 	Meat
+	CookedMeat
+	Apple
 	Lava
 	Wool
 	Bed
@@ -161,7 +163,11 @@ var blocks = [numBlocks]blockInfo{
 	TNT: {Name: "TNT", Top: col(200, 50, 40), Side: col(200, 50, 40), Bottom: col(200, 50, 40),
 		Pat: [3]texPattern{PatTNTTop, PatTNT, PatTNTTop}, MineTime: 0.3, Drops: TNT, Solid: true},
 	Meat: {Name: "Raw Meat", Top: col(215, 90, 90), Side: col(215, 90, 90), Bottom: col(215, 90, 90),
-		Pat: [3]texPattern{PatMeat, PatMeat, PatMeat}, MineTime: 0.1, Drops: Meat, Food: 30},
+		Pat: [3]texPattern{PatMeat, PatMeat, PatMeat}, MineTime: 0.1, Drops: Meat, Food: 5},
+	CookedMeat: {Name: "Cooked Meat", Top: col(150, 95, 60), Side: col(150, 95, 60), Bottom: col(150, 95, 60),
+		Pat: [3]texPattern{PatMeat, PatMeat, PatMeat}, MineTime: 0.1, Drops: CookedMeat, Food: 10},
+	Apple: {Name: "Apple", Top: col(210, 40, 40), Side: col(210, 40, 40), Bottom: col(210, 40, 40),
+		Pat: [3]texPattern{PatApple, PatApple, PatApple}, MineTime: 0.1, Drops: Apple, Food: 4},
 	Lava: {Name: "Lava", Top: col(240, 110, 20), Side: col(230, 95, 15), Bottom: col(200, 80, 10),
 		Pat: [3]texPattern{PatLava, PatLava, PatLava}, MineTime: -1, Emit: 15},
 	Wool: {Name: "Wool", Top: col(235, 235, 230), Side: col(228, 228, 222), Bottom: col(220, 220, 215),

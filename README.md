@@ -19,6 +19,13 @@ block textures and sound effects are generated at startup.
   for a diamond and 500 points.
 - **Giants** walk on every fifth night: huge, slow, 60 health, and they smash through anything but
   bedrock to reach you. Worth 1500 points and three diamonds.
+- **Hunger**: ten drumsticks next to the hearts drain as you move, sprint, jump and swim. Below a third you
+  cannot sprint; empty, you starve. Eat raw meat, cooked meat (craft from meat and coal) or apples that
+  drop from leaves. A full stomach heals you faster.
+- **Achievements**: fourteen goals from breaking your first block to slaying a giant, with a toast when
+  earned and a list on K. They persist across worlds.
+- Blocks crack progressively as you mine them, and a gentle generated music loop plays in the world
+  (N on the pause screen turns it off).
 - **Creative mode** (G on the pause screen): double-tap Space to fly (Space up, Shift down, Ctrl fast),
   every block is on the hotbar in unlimited supply, blocks break instantly, and nothing can hurt you.
   Hostiles ignore creative players.
@@ -79,6 +86,7 @@ block textures and sound effects are generated at startup.
 | H | Controls help |
 | M | Full map |
 | T (online) | Chat |
+| K | Achievements |
 | P (online, hold) | Player list |
 | S (paused) | Save world |
 | C (menu) | Continue saved world |

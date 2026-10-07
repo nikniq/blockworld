@@ -47,6 +47,7 @@ const (
 	PatFlower
 	PatSpawner
 	PatCrate
+	PatApple
 )
 
 const (
@@ -325,6 +326,15 @@ func texel(p texPattern, base rl.Color, info *blockInfo, x, y, seed int) rl.Colo
 			return mul(rl.NewColor(220, 190, 80, 255), 0.9+0.2*n) // clasp
 		}
 		return mul(base, 0.85+0.3*hash2(x/3, y, seed))
+	case PatApple:
+		dx, dy := float32(x)-7.5, float32(y)-8.5
+		if dx*dx+dy*dy < 36 {
+			return mul(base, 0.8+0.35*n)
+		}
+		if y < 4 && x >= 7 && x <= 8 {
+			return mul(rl.NewColor(100, 70, 40, 255), 0.9+0.2*n) // stalk
+		}
+		return rl.NewColor(0, 0, 0, 0)
 	case PatTorch:
 		if y < 6 {
 			return mul(blocks[Torch].Top, 0.85+0.3*n)

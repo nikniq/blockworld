@@ -49,7 +49,11 @@ const skinTiles = 32 // tiles per atlas row
 
 func skinTile(kind SkinKind, part, face int) int { return (int(kind)*numParts+part)*6 + face }
 
-var skinRows = (int(numSkins)*numParts*6 + skinTiles - 1) / skinTiles
+// The slot after the last skin holds the block-breaking crack stages (one per part index).
+const skinCracks = numSkins
+const crackStages = 10
+
+var skinRows = ((int(numSkins)+1)*numParts*6 + skinTiles - 1) / skinTiles
 
 func skinUV(kind SkinKind, part, face int) (u0, v0, u1, v1 float32) {
 	i := skinTile(kind, part, face)
@@ -100,6 +104,23 @@ func paintSkin(kind SkinKind, part, face, x, y int) rl.Color {
 			}
 		}
 		return shade(base)
+	}
+	if kind == skinCracks {
+		// Cracks radiating from the centre; more and longer with each stage.
+		stage := part
+		for k := 0; k <= stage; k++ {
+			ang := float64(hash2(k, 1, 900)) * 2 * math.Pi
+			length := 3 + float32(stage)*1.1 + hash2(k, 2, 900)*2
+			dx, dy := float32(math.Cos(ang)), float32(math.Sin(ang))
+			px, py := float32(x)-7.5, float32(y)-7.5
+			along := px*dx + py*dy
+			across := px*dy - py*dx
+			wobble := float32(math.Sin(float64(along)*1.7+float64(k))) * 0.5
+			if along > 0 && along < length && math.Abs(float64(across-wobble)) < 0.8 {
+				return rl.NewColor(20, 20, 20, 230)
+			}
+		}
+		return rl.NewColor(0, 0, 0, 0)
 	}
 	switch kind {
 	case SkinPlayer, SkinZombie, SkinBrute:
@@ -247,7 +268,7 @@ func paintSkin(kind SkinKind, part, face, x, y int) rl.Color {
 
 func buildSkinAtlas() *image.RGBA {
 	img := image.NewRGBA(image.Rect(0, 0, skinTiles*tileSize, skinRows*tileSize))
-	for kind := SkinKind(0); kind < numSkins; kind++ {
+	for kind := SkinKind(0); kind <= numSkins; kind++ {
 		for part := 0; part < numParts; part++ {
 			for face := 0; face < 6; face++ {
 				i := skinTile(kind, part, face)
@@ -497,6 +518,16 @@ func (s *Skins) DrawQuadruped(w *World, kind SkinKind, p *Pose) {
 	if p.Flash > 0 {
 		rl.DrawCubeV(rl.Vector3Add(p.Pos, rl.NewVector3(0, 0.5, 0)), rl.NewVector3(body.X+0.1, legH+body.Y+0.1, body.Z+0.1), rl.Fade(rl.White, p.Flash*0.6))
 	}
+}
+
+// DrawCrack overlays the block-breaking cracks on a block (stage 0..9).
+func (s *Skins) DrawCrack(w *World, x, y, z int, stage int) {
+	s.init(w)
+	stage = max(0, min(crackStages-1, stage))
+	m := rl.MatrixMultiply(rl.MatrixScale(1.02, 1.02, 1.02), rl.MatrixTranslate(float32(x)+0.5, float32(y)+0.5, float32(z)+0.5))
+	mm := s.mat.GetMap(rl.MapDiffuse)
+	mm.Color = lightColor(w, rl.NewVector3(float32(x)+0.5, float32(y)+1.5, float32(z)+0.5), 1)
+	rl.DrawMesh(s.box(skinCracks, stage).mesh, s.mat, m)
 }
 
 func yawOf(heading rl.Vector3) float32 {
