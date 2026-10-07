@@ -6,7 +6,7 @@ block textures and sound effects are generated at startup.
 
 ## Gameplay
 
-- A 96x96x48 block world is generated every run: hills, a mountain band, beaches, a sea,
+- A 192x192x64 block world is generated every run: hills, a mountain band, beaches, a sea,
   winding caves and ore veins (coal, iron, gold, diamond), plus stone-brick ruins for cover.
 - **Biomes**: plains with tall grass and flowers, oak and birch forests, deserts with cacti (they sting),
   and snowy taiga with tall spruces.
@@ -73,6 +73,8 @@ block textures and sound effects are generated at startup.
   pitch black and nights are dim. Craft **torches** (coal ore + planks) and place them anywhere to light
   your mine or base. Hostiles and dropped items are lit by the cell they stand in.
 - Textured blocks with ambient occlusion and smooth lighting, fog, drifting clouds, stars and a sun and moon.
+  Grass and leaves take on the colour of their biome (lush forest, dry desert, cool taiga), textures are
+  mipmapped so distant terrain does not shimmer, and the view fades into fog about 190 blocks out.
   Torchlight is warm and flickers, sunlight turns orange at dawn and dusk and blue at night, water ripples
   and reflects more at grazing angles, leaves let light through, a gradient sky dome glows around the sun,
   creatures cast soft shadows and embers drift up from lava.

@@ -10,13 +10,14 @@ import (
 // The world is a fixed voxel volume. Block coordinates run from originX/originZ
 // (inclusive) to originX+worldW / originZ+worldD (exclusive) on X/Z and 0..worldH on Y.
 const (
-	worldW    = 96
-	worldH    = 48
-	worldD    = 96
+	worldW    = 192
+	worldH    = 64
+	worldD    = 192
 	chunkSize = 16
 	originX   = -worldW / 2
 	originZ   = -worldD / 2
-	seaLevel  = 10 // every air cell at or below this height is filled with water
+	seaLevel  = 10                            // every air cell at or below this height is filled with water
+	areaScale = (worldW * worldD) / (96 * 96) // feature counts were tuned on a 96x96 map
 )
 
 type Block uint8
@@ -276,6 +277,8 @@ type World struct {
 	Ground  []int                      // per column: feet level on the highest solid block
 	Light   []uint8                    // per cell: sunlight in the high nibble, block light in the low nibble
 	Version int                        // bumped on every block change; the nav grid watches it
+	Seed    int                        // generation seed; biomes are derived from it
+	Biome   []Biome                    // per column
 	OnSet   func(x, y, z int, b Block) // called after every Set (multiplayer broadcast)
 	relight map[int]bool               // chunks whose lighting must be recomputed
 	chunks  []*chunk
@@ -308,20 +311,30 @@ type World struct {
 
 func NewWorld() *World {
 	w := newEmptyWorld()
-	w.generate(rand.Int())
+	w.Seed = rand.Int()
+	w.generate(w.Seed)
 	w.finish()
 	return w
 }
 
-// NewWorldFromBlocks rebuilds a world from a saved voxel volume.
-func NewWorldFromBlocks(blocks []Block) *World {
+// NewWorldFromBlocks rebuilds a world from a saved voxel volume and its seed.
+func NewWorldFromBlocks(blocks []Block, seed int) *World {
 	w := newEmptyWorld()
 	copy(w.Blocks, blocks)
+	w.Seed = seed
 	w.finish()
 	return w
 }
 
 func (w *World) finish() {
+	if w.Biome == nil {
+		w.Biome = make([]Biome, worldW*worldD)
+		for z := 0; z < worldD; z++ {
+			for x := 0; x < worldW; x++ {
+				w.Biome[z*worldW+x] = biomeAt(x, z, w.Seed)
+			}
+		}
+	}
 	for z := 0; z < worldD; z++ {
 		for x := 0; x < worldW; x++ {
 			w.recomputeHeight(x, z)
@@ -552,6 +565,7 @@ func biomeAt(x, z int, seed int) Biome {
 func (w *World) generate(seed int) {
 	heights := make([]int, worldW*worldD)
 	biomes := make([]Biome, worldW*worldD)
+	w.Biome = biomes
 	// Terrain: rolling hills, a mountain band, beaches and a sea.
 	for z := 0; z < worldD; z++ {
 		for x := 0; x < worldW; x++ {
@@ -560,7 +574,7 @@ func (w *World) generate(seed int) {
 				0.15*vnoise(fx/6+90, fz/6+90, seed+2) + 0.05*vnoise(fx/3+130, fz/3+130, seed+3)
 			h := 5 + int(n*n*30+n*6)
 			if m := vnoise(fx/30+200, fz/30+200, seed+4); m > 0.62 {
-				h += int((m - 0.62) * 50)
+				h += int((m - 0.62) * 70)
 			}
 			// Flatten the middle so the player spawn is open and dry.
 			dx, dz := float32(x+originX), float32(z+originZ)
@@ -568,7 +582,7 @@ func (w *World) generate(seed int) {
 				t := clamp(d/10, 0, 1)
 				h = int(lerp(14, float32(h), t*t))
 			}
-			h = int(clamp(float32(h), 5, worldH-6))
+			h = int(clamp(float32(h), 5, worldH-8))
 			heights[z*worldW+x] = h
 			biome := biomeAt(x, z, seed)
 			biomes[z*worldW+x] = biome
@@ -582,7 +596,7 @@ func (w *World) generate(seed int) {
 					b = Grass
 					if sandy {
 						b = Sand
-					} else if h >= 34 || (biome == BiomeTaiga && h >= 20) {
+					} else if h >= 40 || (biome == BiomeTaiga && h >= 20) {
 						b = Snow
 					}
 				case y >= h-4:
@@ -647,12 +661,12 @@ func (w *World) generate(seed int) {
 			}
 		}
 	}
-	vein(CoalOre, 300, 4, 42, 9)
-	vein(IronOre, 190, 2, 28, 6)
-	vein(GoldOre, 70, 2, 16, 5)
-	vein(DiamondOre, 40, 1, 9, 4)
+	vein(CoalOre, 300*areaScale, 4, 42, 9)
+	vein(IronOre, 190*areaScale, 2, 28, 6)
+	vein(GoldOre, 70*areaScale, 2, 16, 5)
+	vein(DiamondOre, 40*areaScale, 1, 9, 4)
 	// Trees, cacti and ground cover by biome.
-	for i := 0; i < 900; i++ {
+	for i := 0; i < 900*areaScale; i++ {
 		x, z := rand.Intn(worldW-4)+2, rand.Intn(worldD-4)+2
 		if dx, dz := x+originX, z+originZ; dx*dx+dz*dz < 49 {
 			continue
@@ -695,7 +709,7 @@ func (w *World) generate(seed int) {
 		}
 	}
 	// Dungeons: dark cobblestone rooms deep underground with a spawner and loot.
-	for i := 0; i < 7; i++ {
+	for i := 0; i < 7*areaScale; i++ {
 		x, z := rand.Intn(worldW-12)+6, rand.Intn(worldD-12)+6
 		if dx, dz := x+originX, z+originZ; dx*dx+dz*dz < 144 {
 			continue
@@ -729,8 +743,15 @@ func (w *World) generate(seed int) {
 		w.setLocal(x+3, y+1, z, Air)
 	}
 	// Stone-brick ruins for cover.
-	for _, c := range [][2]int{{-22, -22}, {22, -22}, {-22, 22}, {22, 22}, {0, -30}, {0, 30}, {-32, 0}, {32, 0}, {-14, 34}, {36, -14}} {
+	ruins := [][2]int{{-22, -22}, {22, -22}, {-22, 22}, {22, 22}, {0, -30}, {0, 30}, {-32, 0}, {32, 0}, {-14, 34}, {36, -14}}
+	for i := 0; i < 10*(areaScale-1); i++ {
+		ruins = append(ruins, [2]int{rand.Intn(worldW-12) + 6 + originX, rand.Intn(worldD-12) + 6 + originZ})
+	}
+	for _, c := range ruins {
 		x, z := c[0]-originX, c[1]-originZ
+		if x < 3 || z < 3 || x >= worldW-3 || z >= worldD-3 {
+			continue
+		}
 		h := heights[z*worldW+x]
 		if h <= seaLevel+1 {
 			continue
@@ -1086,6 +1107,23 @@ func (m *meshBuf) emitFaceUV(f *faceDef, u0, v0, u1, v1, x, y, z float32, box [2
 	}
 }
 
+// biomeTintCode returns the vertex-alpha code the shader turns into a biome
+// colour for foliage faces, or 255 for faces that keep their texture colour.
+func biomeTintCode(b Block, f *faceDef, biome Biome) uint8 {
+	foliage := b == Leaves || b == SpruceLeaves || b == TallGrass || b == Sapling || (b == Grass && f.n[1] > 0)
+	if !foliage {
+		return 255
+	}
+	return 250 - uint8(biome)
+}
+
+// setLastFaceAlpha rewrites the alpha of the six vertices just emitted.
+func (m *meshBuf) setLastFaceAlpha(a uint8) {
+	for k := 1; k <= 6; k++ {
+		m.cols[len(m.cols)-4*k+3] = a
+	}
+}
+
 func (m *meshBuf) reset() {
 	m.verts, m.norms, m.uvs, m.cols = m.verts[:0], m.norms[:0], m.uvs[:0], m.cols[:0]
 }
@@ -1139,6 +1177,9 @@ func (w *World) buildChunk(ci, cj int, c *chunk) {
 					box := b.TinyBox()
 					for fi := range faces {
 						c.opaque.emitFace(&faces[fi], b, wx, float32(y), wz, box, 1, [4]int{3, 3, 3, 3}, [4]cornerLight{l, l, l, l})
+						if code := biomeTintCode(b, &faces[fi], w.Biome[lz*worldW+lx]); code != 255 {
+							c.opaque.setLastFaceAlpha(code)
+						}
 					}
 					continue
 				}
@@ -1193,6 +1234,9 @@ func (w *World) buildChunk(ci, cj int, c *chunk) {
 						dst = c.trans
 					}
 					dst.emitFace(f, b, wx, float32(y), wz, box, tint, ao, light)
+					if code := biomeTintCode(b, f, w.Biome[lz*worldW+lx]); code != 255 {
+						dst.setLastFaceAlpha(code)
+					}
 				}
 			}
 		}
@@ -1252,18 +1296,32 @@ uniform float fogEnd;
 uniform float light;
 uniform vec3 sunTint;
 uniform float flicker;
-uniform vec2 tileScale;   // one atlas tile in uv units
+uniform vec4 tileInfo;    // atlas cell size (xy) and the padding offset to the tile inside it (zw), in uv units
 uniform vec2 uvScroll;    // water animation, in tile units (0 for the opaque pass)
 uniform float water;      // 1 in the translucent pass
 out vec4 finalColor;
 void main() {
     vec2 uv = fragTexCoord;
     if (uvScroll != vec2(0.0)) {
-        vec2 origin = floor(uv / tileScale) * tileScale;
-        uv = origin + fract((uv - origin) / tileScale + uvScroll) * tileScale;
+        vec2 inner = tileInfo.xy - 2.0 * tileInfo.zw;
+        vec2 origin = floor(uv / tileInfo.xy) * tileInfo.xy + tileInfo.zw;
+        uv = origin + fract((uv - origin) / inner + uvScroll) * inner;
     }
     vec4 t = texture(texture0, uv);
-    float a = t.a * fragColor.a * colDiffuse.a;
+    // Vertex alpha below 254/255 is a biome tint code for foliage, not transparency.
+    float code = fragColor.a * 255.0;
+    float va = 1.0;
+    vec3 biome = vec3(1.0);
+    if (code < 253.5) {
+        if (code > 249.5) biome = vec3(0.92, 1.0, 0.78);        // plains
+        else if (code > 248.5) biome = vec3(0.72, 1.0, 0.66);   // forest
+        else if (code > 247.5) biome = vec3(1.0, 0.92, 0.55);   // desert
+        else biome = vec3(0.66, 0.96, 0.88);                    // taiga
+        t.rgb *= biome;
+    } else {
+        va = fragColor.a;
+    }
+    float a = t.a * va * colDiffuse.a;
     if (a < 0.02) discard;
     float sun = fragColor.r * colDiffuse.r * light;
     float blk = fragColor.g * colDiffuse.g * flicker;
@@ -1279,6 +1337,10 @@ void main() {
         a = clamp(a * (0.7 + 0.6 * (1.0 - facing)), 0.0, 1.0);
         rgb += vec3(0.06, 0.08, 0.1) * (1.0 - facing) * bs;
     }
+    // Gentle grading: a touch more saturation and contrast.
+    float lum = dot(rgb, vec3(0.299, 0.587, 0.114));
+    rgb = mix(vec3(lum), rgb, 1.12);
+    rgb = (rgb - 0.5) * 1.06 + 0.5;
     float f = clamp((distance(viewPos, fragPos) - fogStart) / (fogEnd - fogStart), 0.0, 1.0);
     finalColor = vec4(mix(rgb, fogColor, f), a);
 }`
@@ -1307,7 +1369,10 @@ func (w *World) initGPU() {
 	img := rl.NewImageFromImage(buildAtlas())
 	w.tex = rl.LoadTextureFromImage(img)
 	rl.UnloadImage(img)
-	rl.SetTextureFilter(w.tex, rl.FilterPoint)
+	// Crisp up close, mipmapped in the distance so far-off blocks stop shimmering.
+	rl.GenTextureMipmaps(&w.tex)
+	rl.TextureParameters(w.tex.ID, rl.TextureMinFilter, rl.TextureFilterNearestMipLinear)
+	rl.TextureParameters(w.tex.ID, rl.TextureMagFilter, 0x2600)
 	w.mat = rl.LoadMaterialDefault()
 	w.mat.GetMap(rl.MapDiffuse).Texture = w.tex
 	w.shader = rl.LoadShaderFromMemory(vertexShader, terrainFragment)
@@ -1322,10 +1387,11 @@ func (w *World) initGPU() {
 		w.locLight = rl.GetShaderLocation(w.shader, "light")
 		w.locSun = rl.GetShaderLocation(w.shader, "sunTint")
 		w.locFlick = rl.GetShaderLocation(w.shader, "flicker")
-		w.locTile = rl.GetShaderLocation(w.shader, "tileScale")
+		w.locTile = rl.GetShaderLocation(w.shader, "tileInfo")
 		w.locScrol = rl.GetShaderLocation(w.shader, "uvScroll")
 		w.locWater = rl.GetShaderLocation(w.shader, "water")
-		rl.SetShaderValue(w.shader, w.locTile, []float32{1 / float32(atlasTiles), 1 / float32(atlasRows)}, rl.ShaderUniformVec2)
+		aw, ah := float32(atlasTiles*atlasCell), float32(atlasRows*atlasCell)
+		rl.SetShaderValue(w.shader, w.locTile, []float32{atlasCell / aw, atlasCell / ah, atlasPad / aw, atlasPad / ah}, rl.ShaderUniformVec4)
 		w.elocView = rl.GetShaderLocation(w.eshader, "viewPos")
 		w.elocFog = rl.GetShaderLocation(w.eshader, "fogColor")
 		w.elocFogS = rl.GetShaderLocation(w.eshader, "fogStart")

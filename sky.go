@@ -10,7 +10,7 @@ import (
 const (
 	dayLength = 360.0 // seconds for a full day/night cycle
 	dayFrac   = 0.6   // fraction of the cycle with the sun up
-	cloudY    = 64
+	cloudY    = 84
 	cloudCell = 8
 )
 
@@ -126,7 +126,7 @@ func (s *Sky) SunTint() [3]float32 {
 // Env builds the shader environment for the frame.
 func (s *Sky) Env(underwater bool, t float32) Env {
 	flicker := 1 + 0.05*float32(math.Sin(float64(t*9))) + 0.03*float32(math.Sin(float64(t*23.7)))
-	env := Env{Light: s.Light(), Fog: s.Color(), FogStart: 48 - 20*s.Rain, FogEnd: 115 - 45*s.Rain, SunTint: s.SunTint(), Flicker: flicker, Time: t}
+	env := Env{Light: s.Light(), Fog: s.Color(), FogStart: 90 - 40*s.Rain, FogEnd: 190 - 80*s.Rain, SunTint: s.SunTint(), Flicker: flicker, Time: t}
 	if underwater {
 		env.Fog = rl.NewColor(16, 50, 110, 255)
 		env.FogStart, env.FogEnd = 1, 22

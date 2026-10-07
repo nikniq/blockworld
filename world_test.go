@@ -39,7 +39,7 @@ func TestGenerateFeatures(t *testing.T) {
 			}
 		}
 	}
-	if caves < 500 {
+	if caves < 500*areaScale {
 		t.Errorf("only %d underground air cells; caves missing", caves)
 	}
 	// The spawn is dry and on solid ground.

@@ -2575,8 +2575,15 @@ func (g *Game) scriptedShots(frame int) bool {
 		for i, k := range []AnimalKind{AnimalPig, AnimalCow, AnimalSheep, AnimalDino} {
 			p := rl.Vector3Add(g.Player.Pos, rl.Vector3Scale(g.Player.FlatForward(), 4+float32(i)*1.5))
 			p.X += float32(i)*2 - 2
+			if k == AnimalDino {
+				p = rl.Vector3Add(g.Player.Pos, rl.Vector3Scale(g.Player.FlatForward(), 6))
+				p.X -= 3
+			}
 			p.Y = float32(g.World.SurfaceY(floorI(p.X), floorI(p.Z)))
-			g.Animals = append(g.Animals, NewAnimal(p, k))
+			a := NewAnimal(p, k)
+			a.Heading = rl.Vector3Scale(g.Player.FlatForward(), -1) // face the camera
+			a.WanderT = 99
+			g.Animals = append(g.Animals, a)
 		}
 	case 200:
 		rl.TakeScreenshot("shot_sky.png")

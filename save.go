@@ -10,7 +10,7 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-const saveVersion = 3
+const saveVersion = 4
 
 // SaveData is the persisted state of a run: the whole voxel volume, the
 // player, the clock and the animals. Hostiles and drops are not kept.
@@ -18,6 +18,7 @@ type SaveData struct {
 	Version   int
 	NumBlocks int
 	Blocks    []Block
+	Seed      int
 	Pos       rl.Vector3
 	Yaw       float32
 	Pitch     float32
@@ -90,7 +91,7 @@ func (g *Game) saveErr() error {
 	}
 	pl := g.Player
 	d := SaveData{
-		Version: saveVersion, NumBlocks: int(numBlocks), Blocks: g.World.Blocks,
+		Version: saveVersion, NumBlocks: int(numBlocks), Blocks: g.World.Blocks, Seed: g.World.Seed,
 		Pos: pl.Pos, Yaw: pl.Yaw, Pitch: pl.Pitch, HP: pl.HP, Ammo: pl.Ammo, Reserve: pl.Reserve,
 		Inv: pl.Inv[:], SwordTier: pl.SwordTier, PickTier: pl.PickTier, ArmorTier: pl.ArmorTier,
 		Spawn: g.Spawn, Deaths: g.Deaths, Hunger: pl.Hunger,
@@ -143,7 +144,7 @@ func (g *Game) load() bool {
 	}
 	g.Reset()
 	g.World.Unload()
-	g.World = NewWorldFromBlocks(d.Blocks)
+	g.World = NewWorldFromBlocks(d.Blocks, d.Seed)
 	g.Nav = NewNavGrid(g.World)
 	pl := g.Player
 	pl.Pos, pl.Yaw, pl.Pitch = d.Pos, d.Yaw, d.Pitch

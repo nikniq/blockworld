@@ -58,7 +58,9 @@ const (
 
 const (
 	tileSize   = 16
-	atlasTiles = 8 // tiles per row
+	atlasPad   = 8                     // border of repeated edge pixels around each tile, so mipmaps do not bleed
+	atlasCell  = tileSize + 2*atlasPad // pitch of one tile in the atlas
+	atlasTiles = 8                     // tiles per row
 )
 
 var atlasRows = (int(numBlocks)*3 + atlasTiles - 1) / atlasTiles
@@ -69,17 +71,16 @@ func tileIndex(b Block, face int) int { return int(b)*3 + face }
 // sampling never bleeds into the neighbouring tile.
 func tileUV(b Block, face int) (u0, v0, u1, v1 float32) {
 	i := tileIndex(b, face)
-	tx, ty := float32(i%atlasTiles), float32(i/atlasTiles)
-	aw, ah := float32(atlasTiles*tileSize), float32(atlasRows*tileSize)
+	tx, ty := float32(i%atlasTiles)*atlasCell+atlasPad, float32(i/atlasTiles)*atlasCell+atlasPad
+	aw, ah := float32(atlasTiles*atlasCell), float32(atlasRows*atlasCell)
 	const inset = 0.05
-	return (tx*tileSize + inset) / aw, (ty*tileSize + inset) / ah,
-		((tx+1)*tileSize - inset) / aw, ((ty+1)*tileSize - inset) / ah
+	return (tx + inset) / aw, (ty + inset) / ah, (tx + tileSize - inset) / aw, (ty + tileSize - inset) / ah
 }
 
 // TileRect returns the atlas rectangle of a block face in pixels (for the HUD).
 func TileRect(b Block, face int) rl.Rectangle {
 	i := tileIndex(b, face)
-	return rl.NewRectangle(float32(i%atlasTiles*tileSize), float32(i/atlasTiles*tileSize), tileSize, tileSize)
+	return rl.NewRectangle(float32(i%atlasTiles*atlasCell+atlasPad), float32(i/atlasTiles*atlasCell+atlasPad), tileSize, tileSize)
 }
 
 func mul(c rl.Color, v float32) rl.Color {
@@ -93,17 +94,20 @@ func mix(a, b rl.Color, t float32) rl.Color {
 }
 
 func buildAtlas() *image.RGBA {
-	img := image.NewRGBA(image.Rect(0, 0, atlasTiles*tileSize, atlasRows*tileSize))
+	img := image.NewRGBA(image.Rect(0, 0, atlasTiles*atlasCell, atlasRows*atlasCell))
 	for b := Block(1); b < numBlocks; b++ {
 		info := &blocks[b]
 		bases := [3]rl.Color{info.Top, info.Side, info.Bottom}
 		for f := 0; f < 3; f++ {
 			i := tileIndex(b, f)
-			ox, oy := (i%atlasTiles)*tileSize, (i/atlasTiles)*tileSize
+			ox, oy := (i%atlasTiles)*atlasCell, (i/atlasTiles)*atlasCell
 			seed := 1000 + int(b)*3 + f
-			for y := 0; y < tileSize; y++ {
-				for x := 0; x < tileSize; x++ {
-					c := texel(info.Pat[f], bases[f], info, x, y, seed)
+			// Paint the whole cell; coordinates outside the tile clamp to its edge.
+			for y := 0; y < atlasCell; y++ {
+				for x := 0; x < atlasCell; x++ {
+					tx := min(max(x-atlasPad, 0), tileSize-1)
+					ty := min(max(y-atlasPad, 0), tileSize-1)
+					c := texel(info.Pat[f], bases[f], info, tx, ty, seed)
 					img.SetRGBA(ox+x, oy+y, color.RGBA{c.R, c.G, c.B, c.A})
 				}
 			}

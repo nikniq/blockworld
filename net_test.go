@@ -17,7 +17,7 @@ func TestNetCodec(t *testing.T) {
 	rand.Seed(11)
 	w := NewWorld()
 	data := compressWorld(w.Blocks)
-	if len(data) > 200000 {
+	if len(data) > 200000*areaScale {
 		t.Fatalf("world payload too large: %d bytes", len(data))
 	}
 	back, err := decompressWorld(data)
