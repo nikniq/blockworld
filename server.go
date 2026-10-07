@@ -41,6 +41,7 @@ func runServer(addr, name string, testSeconds int) {
 		select {
 		case <-stop:
 			g.save()
+			close(g.Net.beaconStop)
 			fmt.Println("blockworld server: saved, bye")
 			return
 		case <-ticker.C:

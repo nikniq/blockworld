@@ -203,22 +203,23 @@ type inMsg struct {
 
 // Net is the shared networking state of a game.
 type Net struct {
-	Role     NetRole
-	Addr     string
-	Name     string
-	MyID     uint32
-	inbox    chan inMsg
-	mu       sync.Mutex
-	peers    map[uint32]*peer
-	nextID   uint32
-	listener net.Listener
-	server   *peer // client side: the host connection
-	err      error
-	lastSnap time.Time
-	lastSend time.Time
-	Status   string
-	Snaps    int // messages received (client stats)
-	Blocks   int
+	Role       NetRole
+	Addr       string
+	Name       string
+	MyID       uint32
+	inbox      chan inMsg
+	mu         sync.Mutex
+	peers      map[uint32]*peer
+	nextID     uint32
+	listener   net.Listener
+	beaconStop chan struct{}
+	server     *peer // client side: the host connection
+	err        error
+	lastSnap   time.Time
+	lastSend   time.Time
+	Status     string
+	Snaps      int // messages received (client stats)
+	Blocks     int
 }
 
 func init() {
@@ -292,6 +293,8 @@ func (g *Game) StartHost(addr string) error {
 		}{x, y, z, b}}, 0)
 	}
 	go n.acceptLoop(g)
+	n.beaconStop = make(chan struct{})
+	go n.beacon(g, n.beaconStop)
 	n.Status = "Hosting on port " + addr[strings.LastIndex(addr, ":")+1:]
 	if ip := lanIP(); ip != "" {
 		n.Status += "   others join: " + ip + addr[strings.LastIndex(addr, ":"):]

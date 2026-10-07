@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"encoding/gob"
 	"math/rand"
+	"net"
+	"strings"
 	"testing"
+	"time"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -88,5 +91,37 @@ func TestMultipleTargets(t *testing.T) {
 	g.Remotes[7].HP = 0
 	if n := len(g.targets()); n != 1 {
 		t.Fatalf("dead players are not targets: %d", n)
+	}
+}
+
+// A discovery listener hears a beacon and lists the world; stale entries expire.
+func TestDiscovery(t *testing.T) {
+	d := startDiscovery()
+	if d.Err != "" {
+		t.Skip(d.Err)
+	}
+	defer d.Stop()
+	conn, err := net.DialUDP("udp4", nil, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: beaconPort})
+	if err != nil {
+		t.Skip("no loopback udp")
+	}
+	defer conn.Close()
+	_, _ = conn.Write([]byte(beaconPrefix + "7777|Alice|2|3"))
+	var games []LANGame
+	for i := 0; i < 50 && len(games) == 0; i++ {
+		time.Sleep(20 * time.Millisecond)
+		games = d.Games()
+	}
+	if len(games) != 1 || games[0].Name != "Alice" || games[0].Players != 2 || games[0].Day != 3 || !strings.HasSuffix(games[0].Addr, ":7777") {
+		t.Fatalf("games %+v", games)
+	}
+	d.mu.Lock()
+	for k, g := range d.games {
+		g.Seen = g.Seen.Add(-time.Minute)
+		d.games[k] = g
+	}
+	d.mu.Unlock()
+	if len(d.Games()) != 0 {
+		t.Fatal("stale beacons should expire")
 	}
 }

@@ -80,7 +80,8 @@ type Game struct {
 	Net            *Net
 	JoinText       string
 	JoinErr        string
-	JoinField      int  // 0 address, 1 name
+	JoinField      int // 0 address, 1 name
+	Disc           *Discovery
 	Headless       bool // dedicated server: no window, no local player
 	Got            [numAch]bool
 	Toasts         []Toast
@@ -2193,7 +2194,13 @@ func (g *Game) drawOverlay() {
 		if saveExists() {
 			centered("C  continue saved world", sh/2+134, 24, rl.SkyBlue)
 		}
-		centered(fmt.Sprintf("H  host your world for friends        J  join a friend's world        (you are %s)", playerName), sh/2+166, 22, rl.SkyBlue)
+		found := ""
+		if n := len(g.Disc.Games()); n == 1 {
+			found = "   1 world found on your network"
+		} else if n > 1 {
+			found = fmt.Sprintf("   %d worlds found on your network", n)
+		}
+		centered(fmt.Sprintf("H  host your world for friends        J  join a friend's world%s        (you are %s)", found, playerName), sh/2+166, 22, rl.SkyBlue)
 		if g.JoinErr != "" {
 			centered(g.JoinErr, sh/2+196, 18, rl.Orange)
 		}
@@ -2461,6 +2468,15 @@ func (g *Game) updateJoin() {
 	if rl.IsKeyPressed(rl.KeyTab) {
 		g.JoinField = 1 - g.JoinField
 	}
+	// F1..F9 pick a discovered LAN world.
+	if games := g.Disc.Games(); len(games) > 0 {
+		for i, k := range []int32{rl.KeyF1, rl.KeyF2, rl.KeyF3, rl.KeyF4, rl.KeyF5, rl.KeyF6, rl.KeyF7, rl.KeyF8, rl.KeyF9} {
+			if i < len(games) && rl.IsKeyPressed(k) {
+				g.JoinText = games[i].Addr
+				g.JoinField = 0
+			}
+		}
+	}
 	if rl.IsKeyPressed(rl.KeyEscape) {
 		settings.Name = playerName
 		settings.save()
@@ -2516,7 +2532,25 @@ func (g *Game) drawJoin() {
 	if g.JoinErr != "" {
 		centered(g.JoinErr, sh/2+120, 20, rl.Orange)
 	}
-	centered("ESC back     CTRL+V paste", sh/2+160, 18, rl.LightGray)
+	centered("ESC back     CTRL+V paste", sh/2+150, 18, rl.LightGray)
+	// Worlds found on the local network.
+	y := sh/2 + 190
+	games := g.Disc.Games()
+	switch {
+	case g.Disc != nil && g.Disc.Err != "":
+		centered(g.Disc.Err, y, 18, rl.Gray)
+	case len(games) == 0:
+		centered("Searching the local network for hosted worlds ...", y, 18, rl.Gray)
+	default:
+		centered("WORLDS ON YOUR NETWORK   (press F1-F9 to pick one)", y, 18, rl.Gold)
+		for i, gm := range games {
+			if i >= 9 {
+				break
+			}
+			line := fmt.Sprintf("F%d   %s's world   %s   %d players   day %d", i+1, gm.Name, gm.Addr, gm.Players, gm.Day)
+			centered(line, y+26+int32(i)*24, 18, rl.SkyBlue)
+		}
+	}
 }
 
 // scriptedShots drives the screenshot session; returns true when finished.
@@ -2527,15 +2561,14 @@ func (g *Game) scriptedShots(frame int) bool {
 	case 20:
 		g.State = StateJoin
 		g.JoinText = "192.168.1.10:7777"
-	case 26:
+	case 100:
 		rl.TakeScreenshot("shot_join.png")
-	case 28:
 		g.State = StateMenu
-	case 30:
+	case 102:
 		g.Reset()
 		g.Player.Pitch = 0.08
 		g.Player.HoldBlock(Planks)
-	case 100:
+	case 180:
 		g.Sky.Raining, g.Sky.Rain = true, 1
 		g.ShowHelp = true
 		for i, k := range []AnimalKind{AnimalPig, AnimalCow, AnimalSheep} {
@@ -2544,31 +2577,31 @@ func (g *Game) scriptedShots(frame int) bool {
 			p.Y = float32(g.World.SurfaceY(floorI(p.X), floorI(p.Z)))
 			g.Animals = append(g.Animals, NewAnimal(p, k))
 		}
-	case 120:
+	case 200:
 		rl.TakeScreenshot("shot_sky.png")
-	case 130:
+	case 210:
 		g.Player.Pitch = -0.15
 		g.ThirdPerson = true
 		g.Player.Hunger = 13
 		g.ShowHelp = false
 		g.Sky.Raining, g.Sky.Rain = false, 0
 		g.Player.ArmorTier = 2
-	case 142:
+	case 222:
 		rl.TakeScreenshot("shot_third.png")
-	case 145:
+	case 225:
 		g.ThirdPerson = false
 		g.Player.Held = Item{Kind: ItemPickaxe}
 		g.Player.Pitch = -0.6
-	case 146:
+	case 226:
 		forceAttack = true
-	case 151:
+	case 231:
 		forceAttack = false
-	case 150:
+	case 230:
 		if a := g.Player.Aim; a.Hit {
 			g.Player.MineT = g.Player.MineTime(g.World.Get(a.X, a.Y, a.Z)) * 0.6
 		}
 		rl.TakeScreenshot("shot_day.png")
-	case 160:
+	case 240:
 		g.Sky.T = 0.72
 		g.Player.Pitch = -0.1
 		g.Player.Held = Item{Kind: ItemSword}
@@ -2578,19 +2611,19 @@ func (g *Game) scriptedShots(frame int) bool {
 			p.Y = float32(g.World.SurfaceY(floorI(p.X), floorI(p.Z)))
 			g.Enemies = append(g.Enemies, NewEnemy(p, k, 1))
 		}
-	case 170:
+	case 250:
 		// Torches on the ground around the player.
 		for _, d := range [][2]int{{2, 1}, {-2, 2}, {1, -3}, {4, 3}} {
 			x, z := floorI(g.Player.Pos.X)+d[0], floorI(g.Player.Pos.Z)+d[1]
 			g.World.Set(x, g.World.SurfaceY(x, z), z, Torch)
 		}
-	case 200:
+	case 280:
 		rl.TakeScreenshot("shot_night.png")
-	case 210:
+	case 290:
 		g.State = StateCrafting
-	case 230:
+	case 310:
 		rl.TakeScreenshot("shot_craft.png")
-	case 240:
+	case 320:
 		// Into a cave: the nearest dark underground pocket, lit by one torch.
 		g.State = StatePlaying
 		p, w := g.Player, g.World
@@ -2623,9 +2656,9 @@ func (g *Game) scriptedShots(frame int) bool {
 				}
 			}
 		}
-	case 300:
+	case 380:
 		rl.TakeScreenshot("shot_cave.png")
-	case 310:
+	case 390:
 		return true
 	}
 	return false
@@ -2758,6 +2791,9 @@ func main() {
 
 		switch g.State {
 		case StateMenu:
+			if g.Disc == nil {
+				g.Disc = startDiscovery()
+			}
 			if rl.IsKeyPressed(rl.KeyEnter) || rl.IsMouseButtonPressed(rl.MouseButtonLeft) {
 				g.Reset()
 				deleteSave()
@@ -2778,6 +2814,9 @@ func main() {
 				}
 			}
 		case StateJoin:
+			if g.Disc == nil {
+				g.Disc = startDiscovery()
+			}
 			g.updateJoin()
 		case StatePlaying:
 			if g.Chatting {
@@ -2842,6 +2881,10 @@ func main() {
 				g.State = StateMenu
 			}
 		}
+		if g.State != StateMenu && g.State != StateJoin && g.Disc != nil {
+			g.Disc.Stop()
+			g.Disc = nil
+		}
 		g.refreshMinimap(dt)
 		g.updateMusic()
 
@@ -2878,6 +2921,7 @@ func (g *Game) leaveWorld() {
 	}
 	g.save()
 	if g.isHost() {
+		close(g.Net.beaconStop)
 		g.Net.listener.Close()
 		g.Net.broadcast(&Msg{Leave: &struct{ ID uint32 }{0}}, 0)
 		g.Net = nil

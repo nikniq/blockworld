@@ -108,7 +108,8 @@ streams them to everyone else over TCP. Joined players move, mine, build, fight,
 usual; their actions are sent to the host, which applies them and broadcasts the result.
 
 From the main menu press **H** to host (the screen then shows the address friends should type) or
-**J** to type a host's address and your name and join. Names are remembered between runs; every
+**J** to join. Hosts announce themselves on the local network, so the join screen lists the worlds it
+finds: press F1 to F9 to pick one, or type an address for a host elsewhere. Names are remembered between runs; every
 window shows "You are ..." while online. The same works from the command line:
 
 ```sh
@@ -128,7 +129,7 @@ A **dedicated server** runs without a window, for example on a Linux box or a sp
 It loads the saved world (or generates one), auto-saves every two minutes, prints joins, chat and
 day/night events, and saves on Ctrl+C. While online, **T** opens chat and holding **P** lists players.
 
-Open port 7777 on the host's firewall for LAN play. Over the internet, forward the port on the
+Open port 7777 (TCP) on the host's firewall for LAN play, and UDP 7778 if you want it discovered. Over the internet, forward the port on the
 host's router or use a tunnel such as Tailscale. Only the host can save and sleep through the night;
 beds still set each player's own spawn point. Hostiles chase whichever player is nearest.
 Other players are drawn as blocky figures with name tags.
