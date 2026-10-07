@@ -102,9 +102,31 @@ func (s *Sky) overcast(c rl.Color) rl.Color {
 	return mix(c, rl.NewColor(120, 125, 135, 255), s.Rain*0.8)
 }
 
+// SunTint is the colour of sunlight: warm at dawn and dusk, white by day, blue at night.
+func (s *Sky) SunTint() [3]float32 {
+	e := s.Elevation()
+	day := [3]float32{1, 1, 1}
+	dusk := [3]float32{1, 0.72, 0.5}
+	night := [3]float32{0.62, 0.7, 1}
+	lerp3 := func(a, b [3]float32, t float32) [3]float32 {
+		t = clamp(t, 0, 1)
+		return [3]float32{a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t, a[2] + (b[2]-a[2])*t}
+	}
+	switch {
+	case e < -0.2:
+		return night
+	case e < 0.05:
+		return lerp3(night, dusk, (e+0.2)/0.25)
+	case e < 0.35:
+		return lerp3(dusk, day, (e-0.05)/0.3)
+	}
+	return day
+}
+
 // Env builds the shader environment for the frame.
-func (s *Sky) Env(underwater bool) Env {
-	env := Env{Light: s.Light(), Fog: s.Color(), FogStart: 48 - 20*s.Rain, FogEnd: 115 - 45*s.Rain}
+func (s *Sky) Env(underwater bool, t float32) Env {
+	flicker := 1 + 0.05*float32(math.Sin(float64(t*9))) + 0.03*float32(math.Sin(float64(t*23.7)))
+	env := Env{Light: s.Light(), Fog: s.Color(), FogStart: 48 - 20*s.Rain, FogEnd: 115 - 45*s.Rain, SunTint: s.SunTint(), Flicker: flicker, Time: t}
 	if underwater {
 		env.Fog = rl.NewColor(16, 50, 110, 255)
 		env.FogStart, env.FogEnd = 1, 22
@@ -124,6 +146,60 @@ func (s *Sky) TimeLabel() string {
 		return "Sunset"
 	}
 	return "Day"
+}
+
+// DrawDome paints a gradient sky with a glow around the sun, far behind everything.
+func (s *Sky) DrawDome(cam rl.Camera3D) {
+	eye := cam.Position
+	horizon := s.Color()
+	zenith := mix(horizon, rl.NewColor(40, 90, 200, 255), 0.55*(1-s.Rain))
+	if s.Elevation() < 0 {
+		zenith = mix(horizon, rl.NewColor(2, 3, 12, 255), 0.7)
+	}
+	sun := s.SunDir()
+	glow := rl.NewColor(255, 215, 140, 255)
+	if s.Elevation() < 0.25 {
+		glow = rl.NewColor(255, 150, 80, 255)
+	}
+	const segs, rings = 24, 6
+	const r = 420
+	colorAt := func(elev, az float32) rl.Color {
+		t := clamp(elev/1.2, 0, 1)
+		c := mix(horizon, zenith, t*t)
+		dir := rl.NewVector3(float32(math.Cos(float64(az)))*float32(math.Cos(float64(elev))), float32(math.Sin(float64(elev))), float32(math.Sin(float64(az)))*float32(math.Cos(float64(elev))))
+		d := rl.Vector3DotProduct(dir, sun)
+		if d > 0.6 && s.Elevation() > -0.25 {
+			c = mix(c, glow, (d-0.6)/0.4*0.6*(1-s.Rain))
+		}
+		return c
+	}
+	rl.DisableBackfaceCulling()
+	rl.Begin(rl.Triangles)
+	for i := 0; i < rings; i++ {
+		e0 := -0.15 + float32(i)*(math.Pi/2+0.15)/rings
+		e1 := -0.15 + float32(i+1)*(math.Pi/2+0.15)/rings
+		for j := 0; j < segs; j++ {
+			a0 := float32(j) * 2 * math.Pi / segs
+			a1 := float32(j+1) * 2 * math.Pi / segs
+			pt := func(e, a float32) rl.Vector3 {
+				return rl.NewVector3(eye.X+r*float32(math.Cos(float64(a))*math.Cos(float64(e))), eye.Y+r*float32(math.Sin(float64(e))), eye.Z+r*float32(math.Sin(float64(a))*math.Cos(float64(e))))
+			}
+			v := func(e, a float32) {
+				c := colorAt(e, a)
+				rl.Color4ub(c.R, c.G, c.B, 255)
+				p := pt(e, a)
+				rl.Vertex3f(p.X, p.Y, p.Z)
+			}
+			v(e0, a0)
+			v(e1, a0)
+			v(e1, a1)
+			v(e0, a0)
+			v(e1, a1)
+			v(e0, a1)
+		}
+	}
+	rl.End()
+	rl.EnableBackfaceCulling()
 }
 
 // DrawSky draws the sun, moon and stars far away around the camera (before the world).

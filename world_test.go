@@ -185,8 +185,8 @@ func TestAtlas(t *testing.T) {
 			if c.A == 255 {
 				t.Errorf("%s should be translucent", blocks[b].Name)
 			}
-		} else if blocks[b].Tiny || blocks[b].Item {
-			continue // plants and items are alpha-cutout tiles
+		} else if blocks[b].Tiny || blocks[b].Item || b == Leaves || b == SpruceLeaves {
+			continue // plants, items and leaves are alpha-cutout tiles
 		} else if c.A != 255 {
 			t.Errorf("%s tile is transparent", blocks[b].Name)
 		}
@@ -204,9 +204,16 @@ func TestLighting(t *testing.T) {
 	if w.sunLocal(lx, floorI(s.Y), lz) != 15 {
 		t.Fatalf("spawn sunlight %d", w.sunLocal(lx, floorI(s.Y), lz))
 	}
-	// Dig a sealed room three blocks under the spawn.
+	// Dig a sealed room three blocks under the spawn, walling it in stone so no cave leaks light in.
 	x, z := floorI(s.X), floorI(s.Z)
 	y := floorI(s.Y) - 5
+	for dx := -2; dx <= 2; dx++ {
+		for dz := -2; dz <= 2; dz++ {
+			for dy := -1; dy <= 1; dy++ {
+				w.Set(x+dx, y+dy, z+dz, Stone)
+			}
+		}
+	}
 	for dx := -1; dx <= 1; dx++ {
 		for dz := -1; dz <= 1; dz++ {
 			w.Set(x+dx, y, z+dz, Air)

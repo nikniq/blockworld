@@ -70,6 +70,9 @@ block textures and sound effects are generated at startup.
   pitch black and nights are dim. Craft **torches** (coal ore + planks) and place them anywhere to light
   your mine or base. Hostiles and dropped items are lit by the cell they stand in.
 - Textured blocks with ambient occlusion and smooth lighting, fog, drifting clouds, stars and a sun and moon.
+  Torchlight is warm and flickers, sunlight turns orange at dawn and dusk and blue at night, water ripples
+  and reflects more at grazing angles, leaves let light through, a gradient sky dome glows around the sun,
+  creatures cast soft shadows and embers drift up from lava.
 - Compass and coordinates under the minimap. F5 switches to a third-person view of your blocky self.
 - Score points for kills, headshots and nights survived. Your best score is saved between runs.
 

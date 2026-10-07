@@ -264,6 +264,9 @@ type Env struct {
 	Light            float32
 	Fog              rl.Color
 	FogStart, FogEnd float32
+	SunTint          [3]float32 // colour of sunlight (orange at dawn, blue at night)
+	Flicker          float32    // torch light wobble around 1
+	Time             float32
 }
 
 // World holds the voxel volume, per-column heights and chunk meshes.
@@ -290,11 +293,17 @@ type World struct {
 	locFogS  int32
 	locFogE  int32
 	locLight int32
+	locSun   int32
+	locFlick int32
+	locTile  int32
+	locScrol int32
+	locWater int32
 	elocView int32
 	elocFog  int32
 	elocFogS int32
 	elocFogE int32
 	blockM   map[Block]*meshBuf // unit cube meshes for item drops
+	envTime  float32
 }
 
 func NewWorld() *World {
@@ -1031,6 +1040,7 @@ type cornerLight struct{ sun, blk float32 }
 
 var fullLight = [4]cornerLight{{1, 1}, {1, 1}, {1, 1}, {1, 1}}
 var unitBox = [2][3]float32{{0, 0, 0}, {1, 1, 1}}
+var waterBox = [2][3]float32{{0, 0, 0}, {1, 0.875, 1}}
 
 // emitFace appends one textured block face to a mesh buffer. The vertex colour
 // encodes lighting for the terrain shader: R = sunlight, G = block light,
@@ -1134,11 +1144,16 @@ func (w *World) buildChunk(ci, cj int, c *chunk) {
 				}
 				// Subtle per-block tint variation gives a weathered look.
 				tint := 0.93 + hash2(lx, y*131+lz, 7)*0.1
+				box := unitBox
+				if b == Water && w.getLocal(lx, y+1, lz) != Water {
+					box = waterBox // the surface sits a little below the block top
+				}
 				for fi := range faces {
 					f := &faces[fi]
 					nx, ny, nz := lx+f.n[0], y+f.n[1], lz+f.n[2]
 					nb := w.getLocal(nx, ny, nz)
-					if nb.Opaque() || (trans && nb == b) {
+					leafy := b == Leaves || b == SpruceLeaves
+					if (nb.Opaque() && !(leafy && nb == b)) || (trans && nb == b) {
 						continue
 					}
 					ao := [4]int{3, 3, 3, 3}
@@ -1177,7 +1192,7 @@ func (w *World) buildChunk(ci, cj int, c *chunk) {
 					if trans {
 						dst = c.trans
 					}
-					dst.emitFace(f, b, wx, float32(y), wz, unitBox, tint, ao, light)
+					dst.emitFace(f, b, wx, float32(y), wz, box, tint, ao, light)
 				}
 			}
 		}
@@ -1207,15 +1222,18 @@ func (w *World) BlockMesh(b Block) *meshBuf {
 const vertexShader = `#version 330
 in vec3 vertexPosition;
 in vec2 vertexTexCoord;
+in vec3 vertexNormal;
 in vec4 vertexColor;
 uniform mat4 mvp;
 out vec2 fragTexCoord;
 out vec4 fragColor;
 out vec3 fragPos;
+out vec3 fragNormal;
 void main() {
     fragTexCoord = vertexTexCoord;
     fragColor = vertexColor;
     fragPos = vertexPosition;
+    fragNormal = vertexNormal;
     gl_Position = mvp * vec4(vertexPosition, 1.0);
 }`
 
@@ -1224,6 +1242,7 @@ const terrainFragment = `#version 330
 in vec2 fragTexCoord;
 in vec4 fragColor;
 in vec3 fragPos;
+in vec3 fragNormal;
 uniform sampler2D texture0;
 uniform vec4 colDiffuse;
 uniform vec3 viewPos;
@@ -1231,16 +1250,35 @@ uniform vec3 fogColor;
 uniform float fogStart;
 uniform float fogEnd;
 uniform float light;
+uniform vec3 sunTint;
+uniform float flicker;
+uniform vec2 tileScale;   // one atlas tile in uv units
+uniform vec2 uvScroll;    // water animation, in tile units (0 for the opaque pass)
+uniform float water;      // 1 in the translucent pass
 out vec4 finalColor;
 void main() {
-    vec4 t = texture(texture0, fragTexCoord);
+    vec2 uv = fragTexCoord;
+    if (uvScroll != vec2(0.0)) {
+        vec2 origin = floor(uv / tileScale) * tileScale;
+        uv = origin + fract((uv - origin) / tileScale + uvScroll) * tileScale;
+    }
+    vec4 t = texture(texture0, uv);
     float a = t.a * fragColor.a * colDiffuse.a;
     if (a < 0.02) discard;
     float sun = fragColor.r * colDiffuse.r * light;
-    float blk = fragColor.g * colDiffuse.g;
-    float l = max(sun, blk);
-    float bright = 0.03 + 0.97 * l * l;
-    vec3 rgb = t.rgb * fragColor.b * colDiffuse.b * bright;
+    float blk = fragColor.g * colDiffuse.g * flicker;
+    float bs = 0.03 + 0.97 * sun * sun;
+    float bb = 0.97 * blk * blk;
+    vec3 torchTint = vec3(1.0, 0.82, 0.58);
+    vec3 lit = max(sunTint * bs, torchTint * bb);
+    vec3 rgb = t.rgb * fragColor.b * colDiffuse.b * lit;
+    if (water > 0.5) {
+        // More reflective (opaque) at grazing angles, clearer looking straight down.
+        vec3 v = normalize(viewPos - fragPos);
+        float facing = abs(dot(normalize(fragNormal), v));
+        a = clamp(a * (0.7 + 0.6 * (1.0 - facing)), 0.0, 1.0);
+        rgb += vec3(0.06, 0.08, 0.1) * (1.0 - facing) * bs;
+    }
     float f = clamp((distance(viewPos, fragPos) - fogStart) / (fogEnd - fogStart), 0.0, 1.0);
     finalColor = vec4(mix(rgb, fogColor, f), a);
 }`
@@ -1282,6 +1320,12 @@ func (w *World) initGPU() {
 		w.locFogS = rl.GetShaderLocation(w.shader, "fogStart")
 		w.locFogE = rl.GetShaderLocation(w.shader, "fogEnd")
 		w.locLight = rl.GetShaderLocation(w.shader, "light")
+		w.locSun = rl.GetShaderLocation(w.shader, "sunTint")
+		w.locFlick = rl.GetShaderLocation(w.shader, "flicker")
+		w.locTile = rl.GetShaderLocation(w.shader, "tileScale")
+		w.locScrol = rl.GetShaderLocation(w.shader, "uvScroll")
+		w.locWater = rl.GetShaderLocation(w.shader, "water")
+		rl.SetShaderValue(w.shader, w.locTile, []float32{1 / float32(atlasTiles), 1 / float32(atlasRows)}, rl.ShaderUniformVec2)
 		w.elocView = rl.GetShaderLocation(w.eshader, "viewPos")
 		w.elocFog = rl.GetShaderLocation(w.eshader, "fogColor")
 		w.elocFogS = rl.GetShaderLocation(w.eshader, "fogStart")
@@ -1330,6 +1374,11 @@ func (w *World) SetEnv(cam rl.Camera3D, env Env) {
 	rl.SetShaderValue(w.shader, w.locFogS, []float32{env.FogStart}, rl.ShaderUniformFloat)
 	rl.SetShaderValue(w.shader, w.locFogE, []float32{env.FogEnd}, rl.ShaderUniformFloat)
 	rl.SetShaderValue(w.shader, w.locLight, []float32{env.Light}, rl.ShaderUniformFloat)
+	rl.SetShaderValue(w.shader, w.locSun, env.SunTint[:], rl.ShaderUniformVec3)
+	rl.SetShaderValue(w.shader, w.locFlick, []float32{env.Flicker}, rl.ShaderUniformFloat)
+	rl.SetShaderValue(w.shader, w.locScrol, []float32{0, 0}, rl.ShaderUniformVec2)
+	rl.SetShaderValue(w.shader, w.locWater, []float32{0}, rl.ShaderUniformFloat)
+	w.envTime = env.Time
 	rl.SetShaderValue(w.eshader, w.elocView, []float32{cam.Position.X, cam.Position.Y, cam.Position.Z}, rl.ShaderUniformVec3)
 	rl.SetShaderValue(w.eshader, w.elocFog, []float32{float32(env.Fog.R) / 255, float32(env.Fog.G) / 255, float32(env.Fog.B) / 255}, rl.ShaderUniformVec3)
 	rl.SetShaderValue(w.eshader, w.elocFogS, []float32{env.FogStart}, rl.ShaderUniformFloat)
@@ -1380,8 +1429,13 @@ func (w *World) Draw(cam rl.Camera3D) {
 	})
 }
 
-// DrawTranslucent renders water and glass; call after everything opaque.
+// DrawTranslucent renders water and glass with animated, angle-dependent water.
 func (w *World) DrawTranslucent(cam rl.Camera3D) {
+	if w.shaderOK {
+		t := w.envTime
+		rl.SetShaderValue(w.shader, w.locScrol, []float32{float32(math.Sin(float64(t*0.7))) * 0.15, t * 0.08}, rl.ShaderUniformVec2)
+		rl.SetShaderValue(w.shader, w.locWater, []float32{1}, rl.ShaderUniformFloat)
+	}
 	rl.DisableBackfaceCulling()
 	w.visibleChunks(cam, func(c *chunk) {
 		if c.trans.loaded {
@@ -1389,6 +1443,10 @@ func (w *World) DrawTranslucent(cam rl.Camera3D) {
 		}
 	})
 	rl.EnableBackfaceCulling()
+	if w.shaderOK {
+		rl.SetShaderValue(w.shader, w.locScrol, []float32{0, 0}, rl.ShaderUniformVec2)
+		rl.SetShaderValue(w.shader, w.locWater, []float32{0}, rl.ShaderUniformFloat)
+	}
 }
 
 // DrawBlockAt draws a block-textured cube with the given transform (item drops),

@@ -1230,6 +1230,7 @@ func (g *Game) update(dt float32) {
 	}
 	g.checkAchievements()
 	g.updateToasts(dt)
+	g.spawnEmbers()
 	g.RainCD -= dt
 	if g.Sky.Rain > 0.1 && g.RainCD <= 0 && g.World.SkyExposed(p.Eye()) {
 		g.RainCD = 0.85
@@ -1483,10 +1484,11 @@ func (g *Game) draw3D() {
 	p := g.Player
 	cam := g.camera()
 	w := g.World
-	env := g.Sky.Env(p.HeadWater)
+	env := g.Sky.Env(p.HeadWater, float32(rl.GetTime()))
 	w.SetEnv(cam, env)
 	rl.BeginMode3D(cam)
 	if !p.HeadWater {
+		g.Sky.DrawDome(cam)
 		g.Sky.DrawSky(cam)
 	}
 	w.Draw(cam)
@@ -1510,6 +1512,7 @@ func (g *Game) draw3D() {
 		}
 		g.drawHumanoid(r.PlayerState, off, TierIron, TierIron, w.Luminance(rl.NewVector3(r.Pos.X, r.Pos.Y+1, r.Pos.Z), env.Light))
 	}
+	g.drawShadows()
 	g.drawDrops()
 	g.drawArrows()
 	for i := range g.Primed {
@@ -1562,6 +1565,55 @@ func (g *Game) draw3D() {
 	}
 	w.DrawTranslucent(cam)
 	rl.EndMode3D()
+}
+
+// drawShadows puts a soft dark blob under every creature so it reads as standing on the ground.
+func (g *Game) drawShadows() {
+	w := g.World
+	blob := func(pos rl.Vector3, radius float32) {
+		x, z := floorI(pos.X), floorI(pos.Z)
+		for y := floorI(pos.Y); y >= floorI(pos.Y)-4 && y >= 0; y-- {
+			if w.Solid(x, y, z) {
+				h := pos.Y - float32(y+1)
+				a := clamp(0.45-h*0.1, 0, 0.45)
+				if a > 0.02 {
+					rl.DrawCubeV(rl.NewVector3(pos.X, float32(y+1)+0.015, pos.Z), rl.NewVector3(radius*2, 0.005, radius*2), rl.Fade(rl.Black, a))
+				}
+				return
+			}
+		}
+	}
+	for _, e := range g.Enemies {
+		if e.Alive {
+			blob(e.Pos, e.Spec.Radius*1.1)
+		}
+	}
+	for _, a := range g.Animals {
+		if a.Alive {
+			blob(a.Pos, a.Spec.Radius*1.1)
+		}
+	}
+	for _, r := range g.Remotes {
+		blob(r.Pos, 0.35)
+	}
+	if g.ThirdPerson {
+		blob(g.Player.Pos, 0.35)
+	}
+}
+
+// spawnEmbers lifts glowing sparks off nearby lava.
+func (g *Game) spawnEmbers() {
+	p := g.Player
+	w := g.World
+	for i := 0; i < 6; i++ {
+		x := floorI(p.Pos.X) + rand.Intn(25) - 12
+		y := floorI(p.Pos.Y) + rand.Intn(13) - 8
+		z := floorI(p.Pos.Z) + rand.Intn(25) - 12
+		if w.Get(x, y, z) == Lava && w.Get(x, y+1, z) == Air && rand.Float32() < 0.25 {
+			pos := rl.NewVector3(float32(x)+rand.Float32(), float32(y)+0.95, float32(z)+rand.Float32())
+			g.Sparks = append(g.Sparks, Spark{pos, rl.NewVector3(rand.Float32()-0.5, 2.5+rand.Float32()*2, rand.Float32()-0.5), 0.5 + rand.Float32()*0.4, rl.NewColor(255, 150+uint8(rand.Intn(80)), 30, 255)})
+		}
+	}
 }
 
 // drawHumanoid draws a player: the local one in third person, or a remote one.

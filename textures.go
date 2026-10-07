@@ -176,6 +176,9 @@ func texel(p texPattern, base rl.Color, info *blockInfo, x, y, seed int) rl.Colo
 		}
 		return mul(base, v+0.08*n)
 	case PatLeaves:
+		if hash2(x, y, seed+9) < 0.16 {
+			return rl.NewColor(0, 0, 0, 0) // gaps between leaves
+		}
 		v := 0.6 + 0.6*n
 		if n < 0.08 {
 			v = 0.3
