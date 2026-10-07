@@ -16,6 +16,7 @@ const (
 	AnimalCow
 	AnimalSheep
 	AnimalDino
+	AnimalTrader
 	numAnimalKinds
 )
 
@@ -33,10 +34,11 @@ type animalSpec struct {
 }
 
 var animalKinds = [...]animalSpec{
-	AnimalPig:   {"Pig", 4, 1.6, 0.35, 0.9, rl.NewColor(235, 160, 170, 255), rl.NewColor(240, 170, 180, 255), rl.NewColor(220, 140, 150, 255), 2, 0},
-	AnimalCow:   {"Cow", 6, 1.4, 0.4, 1.3, rl.NewColor(80, 55, 40, 255), rl.NewColor(90, 65, 50, 255), rl.NewColor(60, 40, 30, 255), 3, 0},
-	AnimalSheep: {"Sheep", 4, 1.5, 0.4, 1.1, rl.NewColor(230, 230, 225, 255), rl.NewColor(70, 60, 55, 255), rl.NewColor(60, 55, 50, 255), 1, 0},
-	AnimalDino:  {"Dinosaur", 45, 2.2, 0.7, 2.8, rl.NewColor(70, 120, 60, 255), rl.NewColor(80, 130, 65, 255), rl.NewColor(60, 100, 50, 255), 8, 18},
+	AnimalPig:    {"Pig", 4, 1.6, 0.35, 0.9, rl.NewColor(235, 160, 170, 255), rl.NewColor(240, 170, 180, 255), rl.NewColor(220, 140, 150, 255), 2, 0},
+	AnimalCow:    {"Cow", 6, 1.4, 0.4, 1.3, rl.NewColor(80, 55, 40, 255), rl.NewColor(90, 65, 50, 255), rl.NewColor(60, 40, 30, 255), 3, 0},
+	AnimalSheep:  {"Sheep", 4, 1.5, 0.4, 1.1, rl.NewColor(230, 230, 225, 255), rl.NewColor(70, 60, 55, 255), rl.NewColor(60, 55, 50, 255), 1, 0},
+	AnimalDino:   {"Dinosaur", 45, 2.2, 0.7, 2.8, rl.NewColor(70, 120, 60, 255), rl.NewColor(80, 130, 65, 255), rl.NewColor(60, 100, 50, 255), 8, 18},
+	AnimalTrader: {"Wandering Trader", 20, 1.2, 0.3, 1.8, rl.NewColor(90, 60, 130, 255), rl.NewColor(205, 160, 120, 255), rl.NewColor(60, 40, 90, 255), 0, 0},
 }
 
 type Animal struct {
@@ -53,6 +55,7 @@ type Animal struct {
 	BiteCD   float32
 	RoarCD   float32
 	StepFlag int
+	Visit    float32 // seconds a trader has been around
 	Phase    float32
 	Alive    bool
 	DeathT   float32
@@ -171,6 +174,20 @@ func (a *Animal) Draw(w *World) {
 		kind, scale = SkinCow, 0.93
 	case AnimalSheep:
 		kind, scale = SkinSheep, 0.95
+	case AnimalTrader:
+		pose := Pose{Pos: a.Pos, Yaw: yawOf(a.Heading), Phase: a.Phase, Amp: 0, Scale: 0.9, Lum: a.Lum, Alpha: 1}
+		if a.Walking || a.Flee > 0 {
+			pose.Amp = 1
+		}
+		if !a.Alive {
+			pose.Death = clamp(a.DeathT*2.5, 0, 1)
+			pose.Alpha = 1 - pose.Death
+			if pose.Death >= 1 {
+				return
+			}
+		}
+		skins.DrawHumanoid(w, SkinTrader, &pose)
+		return
 	case AnimalDino:
 		pose := Pose{Pos: a.Pos, Yaw: yawOf(a.Heading), Phase: a.Phase, Amp: 0, Scale: 1, Lum: a.Lum, Alpha: 1}
 		if a.Walking || a.Flee > 0 {
@@ -230,6 +247,24 @@ func (g *Game) spawnAnimals(n int) {
 		}
 		g.Animals = append(g.Animals, NewAnimal(p, AnimalKind(rand.Intn(int(AnimalDino)))))
 	}
+}
+
+// spawnTrader brings a wandering trader to the surface near the player.
+func (g *Game) spawnTrader() {
+	p := g.World.RandomFreePoint(g.Player.Pos, 12)
+	t := NewAnimal(p, AnimalTrader)
+	t.Walking = true
+	g.Animals = append(g.Animals, t)
+	g.announce("A wandering trader has arrived (right click to trade)", 4)
+}
+
+func (g *Game) traderAlive() bool {
+	for _, a := range g.Animals {
+		if a.Alive && a.Kind == AnimalTrader {
+			return true
+		}
+	}
+	return false
 }
 
 // spawnDinosaur puts one roaming dinosaur far from the player on open ground.
@@ -299,6 +334,20 @@ func (g *Game) updateAnimals(dt float32) {
 		}
 		if g.dinosaurs() == 0 && rand.Float32() < 0.35 {
 			g.spawnDinosaur()
+		}
+		// A trader visits roughly every other day and wanders off after a while.
+		if !g.traderAlive() && !g.Sky.IsNight() && rand.Float32() < 0.12 {
+			g.spawnTrader()
+		}
+		for _, a := range g.Animals {
+			if a.Alive && a.Kind == AnimalTrader {
+				a.Visit += 25
+				if a.Visit > 400 {
+					a.Alive = false
+					a.DeathT = 0
+					g.say("The trader wandered off", 2)
+				}
+			}
 		}
 	}
 }

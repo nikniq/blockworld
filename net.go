@@ -470,9 +470,12 @@ func (g *Game) hostHandle(from uint32, m *Msg) {
 		}
 	case m.Place != nil:
 		pl := m.Place
-		if r, ok := g.Remotes[from]; ok && w.InBounds(pl.X, pl.Y, pl.Z) && withinReach(r.Pos, pl.X, pl.Y, pl.Z) && pl.B.Placeable() {
+		if r, ok := g.Remotes[from]; ok && w.InBounds(pl.X, pl.Y, pl.Z) && withinReach(r.Pos, pl.X, pl.Y, pl.Z) {
 			t := w.Get(pl.X, pl.Y, pl.Z)
-			if (t == Air || (t.Liquid() && !blocks[pl.B].Tiny)) && !(blocks[pl.B].Solid && g.blockOccupied(pl.X, pl.Y, pl.Z)) {
+			door := (t == DoorClosed || t == DoorOpen) && (pl.B == DoorClosed || pl.B == DoorOpen)
+			if door && !(pl.B == DoorClosed && g.blockOccupied(pl.X, pl.Y, pl.Z)) {
+				w.Set(pl.X, pl.Y, pl.Z, pl.B)
+			} else if pl.B.Placeable() && (t == Air || (t.Liquid() && !blocks[pl.B].Tiny)) && !(blocks[pl.B].Solid && g.blockOccupied(pl.X, pl.Y, pl.Z)) {
 				w.Set(pl.X, pl.Y, pl.Z, pl.B)
 			}
 		}

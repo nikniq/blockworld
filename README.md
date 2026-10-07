@@ -48,6 +48,12 @@ block textures and sound effects are generated at startup.
 - **A dinosaur** roams every world: a striped, two-legged beast three blocks tall that thuds as it walks
   and roars across the valley. Leave it alone and it ignores you. Hurt it and it charges and bites for
   serious damage until it loses interest. Slaying it is worth 800 points, eight meat and leather.
+- **Doors**: four planks make a door. Right click opens and closes it; closed doors stop hostiles and arrows.
+- **Wandering trader**: a robed visitor turns up every couple of days and wanders off again. Right click to
+  trade: gold ore for rifle ammo, iron for diamonds, wool for bread, coal for TNT, and more.
+- **Abandoned mineshafts**: timbered corridors with plank floors, torches and loot crates run through the
+  rock, waiting to be broken into.
+- **Storms**: heavy rain brings lightning: a flash, a bolt, and thunder that rolls in after a delay.
 - **Animals**: pigs, cows and sheep graze on the grass and flee when hurt. They drop raw meat;
   hold it and right click to eat for 30 health.
 - **TNT**: craft it from sand and coal, place it, then shoot it or hit it with the sword. It falls,

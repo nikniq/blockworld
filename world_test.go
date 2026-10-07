@@ -655,3 +655,39 @@ func TestDinosaur(t *testing.T) {
 		t.Fatal("dinosaur should stay angry for a while")
 	}
 }
+
+// Doors block when closed and pass when open; mineshafts generate; trades consume and pay.
+func TestDoorsTraderMineshaft(t *testing.T) {
+	rand.Seed(15)
+	g := &Game{Audio: &Audio{}, CraftHover: -1}
+	g.Reset()
+	w := g.World
+	w.Set(30, 30, 30, DoorClosed)
+	if !w.Solid(30, 30, 30) || !blocks[DoorClosed].Tiny {
+		t.Fatal("closed door must block but draw as a panel")
+	}
+	w.Set(30, 30, 30, DoorOpen)
+	if w.Solid(30, 30, 30) || blocks[DoorOpen].Drops != DoorClosed {
+		t.Fatal("open door must let things through and drop a door")
+	}
+	planks := 0
+	for i, b := range w.Blocks {
+		if b == Planks && i/(worldW*worldD) < 20 {
+			planks++
+		}
+	}
+	if planks < 100 {
+		t.Fatalf("mineshafts should leave plank floors underground: %d", planks)
+	}
+	p := g.Player
+	p.Inv[GoldOre] = 2
+	tr := &trades[0]
+	if !tr.can(p) {
+		t.Fatal("two gold should afford the ammo trade")
+	}
+	before := p.Reserve
+	tr.apply(p)
+	if p.Inv[GoldOre] != 0 || p.Reserve != before+24 {
+		t.Fatal("trade should take the gold and pay ammo")
+	}
+}

@@ -26,6 +26,7 @@ const (
 	SkinCow
 	SkinSheep
 	SkinDino
+	SkinTrader
 	numSkins
 )
 
@@ -124,9 +125,15 @@ func paintSkin(kind SkinKind, part, face, x, y int) rl.Color {
 		return rl.NewColor(0, 0, 0, 0)
 	}
 	switch kind {
-	case SkinPlayer, SkinZombie, SkinBrute:
+	case SkinPlayer, SkinZombie, SkinBrute, SkinTrader:
 		skin, shirt, pants := skinTone, col(60, 170, 170), col(50, 60, 150)
 		hair := col(70, 45, 30)
+		if kind == SkinTrader {
+			shirt, pants, hair = col(90, 60, 130), col(60, 40, 90), col(40, 30, 30)
+			if part == PartBody && face == 4 && y > 4 && x >= 5 && x <= 10 && (x+y)%3 == 0 {
+				return col(230, 190, 60) // gold trim
+			}
+		}
 		if kind == SkinZombie {
 			skin, shirt, pants = zombieSkin, col(40, 120, 170), col(45, 50, 120)
 			hair = col(50, 95, 50)

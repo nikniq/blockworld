@@ -25,6 +25,7 @@ const (
 	StateCrafting
 	StateGameOver
 	StateJoin
+	StateTrade
 )
 
 var playerName string
@@ -82,6 +83,10 @@ type Game struct {
 	JoinErr        string
 	JoinField      int // 0 address, 1 name
 	Disc           *Discovery
+	LightningT     float32 // flash remaining
+	ThunderT       float32 // countdown to the thunder clap
+	StormCD        float32
+	Bolt           [2]rl.Vector3
 	Headless       bool // dedicated server: no window, no local player
 	Got            [numAch]bool
 	Toasts         []Toast
@@ -726,6 +731,27 @@ func (g *Game) updateBuilder(dt float32) {
 	} else {
 		p.Mining = false
 	}
+	if usePressed() {
+		if b := w.Get(a.X, a.Y, a.Z); b == DoorClosed || b == DoorOpen {
+			nb := DoorOpen
+			if b == DoorOpen {
+				nb = DoorClosed
+			}
+			if nb == DoorClosed && g.blockOccupied(a.X, a.Y, a.Z) {
+				return
+			}
+			if g.isClient() {
+				g.sendToHost(&Msg{Place: &struct {
+					X, Y, Z int
+					B       Block
+				}{a.X, a.Y, a.Z, nb}})
+			} else {
+				w.Set(a.X, a.Y, a.Z, nb)
+			}
+			g.Audio.Play(g.Audio.Place, 0.6)
+			return
+		}
+	}
 	if usePressed() && w.Get(a.X, a.Y, a.Z) == Bed {
 		g.Spawn = rl.NewVector3(float32(a.X)+0.5, float32(a.Y)+0.5, float32(a.Z)+0.5)
 		if g.isClient() {
@@ -1233,6 +1259,7 @@ func (g *Game) update(dt float32) {
 	g.checkAchievements()
 	g.updateToasts(dt)
 	g.spawnEmbers()
+	g.updateStorm(dt)
 	g.RainCD -= dt
 	if g.Sky.Rain > 0.1 && g.RainCD <= 0 && g.World.SkyExposed(p.Eye()) {
 		g.RainCD = 0.85
@@ -1240,6 +1267,19 @@ func (g *Game) update(dt float32) {
 	}
 	if p.InWater && !wasWater {
 		g.Audio.Play(g.Audio.Splash, 0.6)
+	}
+	if usePressed() && g.State == StatePlaying {
+		ray := rl.NewRay(p.Eye(), p.Forward())
+		for _, an := range g.Animals {
+			if an.Alive && an.Kind == AnimalTrader {
+				if c := rl.GetRayCollisionBox(ray, an.BB()); c.Hit && c.Distance < 4 {
+					g.State = StateTrade
+					g.CraftHover = -1
+					rl.EnableCursor()
+					return
+				}
+			}
+		}
 	}
 	switch p.Held.Kind {
 	case ItemRifle:
@@ -1562,6 +1602,7 @@ func (g *Game) draw3D() {
 	for _, tr := range g.Tracers {
 		rl.DrawLine3D(tr.Start, tr.End, rl.NewColor(255, 240, 160, 255))
 	}
+	g.drawBolt()
 	for _, s := range g.Sparks {
 		rl.DrawCube(s.Pos, 0.1, 0.1, 0.1, rl.Fade(s.Col, s.Life*3))
 	}
@@ -1600,6 +1641,54 @@ func (g *Game) drawShadows() {
 	}
 	if g.ThirdPerson {
 		blob(g.Player.Pos, 0.35)
+	}
+}
+
+// updateStorm strikes lightning now and then while it rains: a flash, a bolt, then thunder.
+func (g *Game) updateStorm(dt float32) {
+	g.LightningT = max(0, g.LightningT-dt)
+	if g.ThunderT > 0 {
+		g.ThunderT -= dt
+		if g.ThunderT <= 0 {
+			g.Audio.Play(g.Audio.Thunder, 0.9)
+			g.Shake = max(g.Shake, 0.25)
+		}
+	}
+	if g.Sky.Rain < 0.6 {
+		return
+	}
+	g.StormCD -= dt
+	if g.StormCD > 0 {
+		return
+	}
+	g.StormCD = 15 + rand.Float32()*30
+	p := g.Player
+	x := p.Pos.X + float32(rand.Intn(60)-30)
+	z := p.Pos.Z + float32(rand.Intn(60)-30)
+	y := float32(g.World.SurfaceY(floorI(x), floorI(z)))
+	g.Bolt = [2]rl.Vector3{{X: x, Y: y + 60, Z: z}, {X: x, Y: y, Z: z}}
+	g.LightningT = 0.25
+	g.ThunderT = 0.3 + rl.Vector3Distance(g.Bolt[1], p.Pos)/80
+	g.burst(g.Bolt[1], rl.NewColor(255, 255, 200, 255), 20)
+}
+
+// drawBolt draws the lightning bolt as a jagged bright line while the flash lasts.
+func (g *Game) drawBolt() {
+	if g.LightningT <= 0 {
+		return
+	}
+	a, b := g.Bolt[0], g.Bolt[1]
+	prev := a
+	for i := 1; i <= 8; i++ {
+		t := float32(i) / 8
+		pt := rl.Vector3Lerp(a, b, t)
+		if i < 8 {
+			pt.X += hash2(i, 1, int(g.StormCD*100))*3 - 1.5
+			pt.Z += hash2(i, 2, int(g.StormCD*100))*3 - 1.5
+		}
+		rl.DrawCylinderEx(prev, pt, 0.12, 0.12, 4, rl.NewColor(255, 255, 230, 255))
+		rl.DrawCylinderEx(prev, pt, 0.35, 0.35, 4, rl.NewColor(200, 220, 255, 90))
+		prev = pt
 	}
 }
 
@@ -1827,6 +1916,9 @@ func (g *Game) drawHUD() {
 	if g.SleepT > 0 {
 		rl.DrawRectangle(0, 0, sw, sh, rl.Fade(rl.Black, clamp(1.6-g.SleepT, 0, 1)))
 	}
+	if g.LightningT > 0 {
+		rl.DrawRectangle(0, 0, sw, sh, rl.Fade(rl.White, g.LightningT*1.6))
+	}
 	// Crosshair.
 	gap := int32(5 + p.BobAmount*4 + p.Recoil*10)
 	l := int32(9)
@@ -2032,7 +2124,7 @@ func (g *Game) drawHelp(sw, sh int32) {
 		"Beds set your spawn point and skip the night. Dying drops your items where you fell.",
 		"Hunger drains as you move; eat meat and apples (right click). Cook meat with coal (E). Full stomach heals.",
 		"Online: T chat   P player list      Creative mode (G in pause): fly with double-tap SPACE, build freely",
-		"K achievements   N (pause) music on/off",
+		"K achievements   N (pause) music on/off      Doors: 4 planks, right click to open. Trader: right click to trade",
 		"H closes this help",
 	}
 	w := int32(760)
@@ -2572,6 +2664,15 @@ func (g *Game) scriptedShots(frame int) bool {
 	case 180:
 		g.Sky.Raining, g.Sky.Rain = true, 1
 		g.ShowHelp = true
+		{
+			d := rl.Vector3Add(g.Player.Pos, rl.Vector3Scale(g.Player.FlatForward(), 3))
+			d.X += 2
+			g.World.Set(floorI(d.X), floorI(g.Player.Pos.Y), floorI(d.Z), DoorClosed)
+			t := NewAnimal(rl.Vector3Add(g.Player.Pos, rl.Vector3Scale(g.Player.FlatForward(), 3.5)), AnimalTrader)
+			t.Heading = rl.Vector3Scale(g.Player.FlatForward(), -1)
+			t.WanderT = 99
+			g.Animals = append(g.Animals, t)
+		}
 		for i, k := range []AnimalKind{AnimalPig, AnimalCow, AnimalSheep, AnimalDino} {
 			p := rl.Vector3Add(g.Player.Pos, rl.Vector3Scale(g.Player.FlatForward(), 4+float32(i)*1.5))
 			p.X += float32(i)*2 - 2
@@ -2822,6 +2923,17 @@ func main() {
 					g.JoinText = settings.LastJoin
 				}
 			}
+		case StateTrade:
+			if rl.IsKeyPressed(rl.KeyEscape) || rl.IsKeyPressed(rl.KeyE) {
+				g.State = StatePlaying
+				rl.DisableCursor()
+				rl.GetMouseDelta()
+			} else {
+				g.updateTrade()
+				if g.isHost() || g.isClient() {
+					g.update(0)
+				}
+			}
 		case StateJoin:
 			if g.Disc == nil {
 				g.Disc = startDiscovery()
@@ -2910,6 +3022,9 @@ func main() {
 			g.drawOverlay()
 		case StateJoin:
 			g.drawJoin()
+		case StateTrade:
+			g.drawHUD()
+			g.drawTrade()
 		default:
 			g.drawHUD()
 			g.drawOverlay()

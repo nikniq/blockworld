@@ -54,6 +54,7 @@ const (
 	PatBread
 	PatBow
 	PatArrow
+	PatDoor
 )
 
 const (
@@ -394,6 +395,17 @@ func texel(p texPattern, base rl.Color, info *blockInfo, x, y, seed int) rl.Colo
 			return mul(base, 0.85+0.3*n)
 		}
 		return rl.NewColor(0, 0, 0, 0)
+	case PatDoor:
+		if x == 0 || x == tileSize-1 || y == 0 || y == tileSize-1 || y == 7 || x == 7 {
+			return mul(base, 0.6+0.1*n) // frame and panel edges
+		}
+		if y >= 2 && y <= 5 && x >= 9 && x <= 13 {
+			return rl.NewColor(190, 225, 240, 255) // window
+		}
+		if y == 9 && x == 2 {
+			return rl.NewColor(230, 200, 60, 255) // handle
+		}
+		return mul(base, 0.85+0.3*hash2(x/3, y, seed))
 	case PatTorch:
 		if y < 6 {
 			return mul(blocks[Torch].Top, 0.85+0.3*n)

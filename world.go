@@ -65,6 +65,8 @@ const (
 	Bread
 	Bow
 	ArrowItem
+	DoorClosed
+	DoorOpen
 	Spawner
 	Crate
 	Bedrock
@@ -101,12 +103,14 @@ type blockInfo struct {
 }
 
 var (
-	torchBox   = [2][3]float32{{0.4375, 0, 0.4375}, {0.5625, 0.625, 0.5625}}
-	bedBox     = [2][3]float32{{0, 0, 0}, {1, 0.5, 1}}
-	saplingBox = [2][3]float32{{0.3, 0, 0.3}, {0.7, 0.8, 0.7}}
-	ladderBox  = [2][3]float32{{0.25, 0, 0.25}, {0.75, 1, 0.75}}
-	plantBox   = [2][3]float32{{0.15, 0, 0.15}, {0.85, 0.85, 0.85}}
-	cropBox    = [2][3]float32{{0.15, 0, 0.15}, {0.85, 0.3, 0.85}}
+	torchBox      = [2][3]float32{{0.4375, 0, 0.4375}, {0.5625, 0.625, 0.5625}}
+	bedBox        = [2][3]float32{{0, 0, 0}, {1, 0.5, 1}}
+	saplingBox    = [2][3]float32{{0.3, 0, 0.3}, {0.7, 0.8, 0.7}}
+	ladderBox     = [2][3]float32{{0.25, 0, 0.25}, {0.75, 1, 0.75}}
+	plantBox      = [2][3]float32{{0.15, 0, 0.15}, {0.85, 0.85, 0.85}}
+	cropBox       = [2][3]float32{{0.15, 0, 0.15}, {0.85, 0.3, 0.85}}
+	doorClosedBox = [2][3]float32{{0, 0, 0.4}, {1, 1, 0.6}}
+	doorOpenBox   = [2][3]float32{{0, 0, 0}, {0.2, 1, 1}}
 )
 
 // Biomes decide the surface blocks and vegetation of a column.
@@ -213,6 +217,10 @@ var blocks = [numBlocks]blockInfo{
 		Pat: [3]texPattern{PatBow, PatBow, PatBow}, MineTime: 0.1, Drops: Bow, Item: true},
 	ArrowItem: {Name: "Arrow", Top: col(190, 170, 130), Side: col(190, 170, 130), Bottom: col(190, 170, 130),
 		Pat: [3]texPattern{PatArrow, PatArrow, PatArrow}, MineTime: 0.1, Drops: ArrowItem, Item: true},
+	DoorClosed: {Name: "Door", Top: col(150, 110, 65), Side: col(150, 110, 65), Bottom: col(150, 110, 65),
+		Pat: [3]texPattern{PatPlanks, PatDoor, PatPlanks}, MineTime: 1.0, Drops: DoorClosed, Solid: true, Tiny: true, Box: &doorClosedBox},
+	DoorOpen: {Name: "Door (open)", Top: col(150, 110, 65), Side: col(150, 110, 65), Bottom: col(150, 110, 65),
+		Pat: [3]texPattern{PatPlanks, PatDoor, PatPlanks}, MineTime: 1.0, Drops: DoorClosed, Tiny: true, Box: &doorOpenBox},
 	Spawner: {Name: "Monster Spawner", Top: col(40, 44, 50), Side: col(40, 44, 50), Bottom: col(40, 44, 50),
 		Pat: [3]texPattern{PatSpawner, PatSpawner, PatSpawner}, MineTime: 6, Hard: true, Drops: Air, Solid: true},
 	Crate: {Name: "Loot Crate", Top: col(170, 130, 70), Side: col(160, 120, 65), Bottom: col(150, 110, 60),
@@ -741,6 +749,48 @@ func (w *World) generate(seed int) {
 		// One doorway so cave explorers can find it.
 		w.setLocal(x+3, y, z, Air)
 		w.setLocal(x+3, y+1, z, Air)
+	}
+	// Abandoned mineshafts: long timbered corridors with a few crates.
+	for i := 0; i < 4*areaScale; i++ {
+		x, z := rand.Intn(worldW-40)+20, rand.Intn(worldD-40)+20
+		y := 8 + rand.Intn(10)
+		if heights[z*worldW+x] < y+10 {
+			continue
+		}
+		dx, dz := 1, 0
+		if rand.Intn(2) == 0 {
+			dx, dz = 0, 1
+		}
+		length := 20 + rand.Intn(20)
+		for k := 0; k < length; k++ {
+			cx, cz := x+dx*k, z+dz*k
+			if cx < 2 || cz < 2 || cx >= worldW-2 || cz >= worldD-2 {
+				break
+			}
+			for s := -1; s <= 1; s++ {
+				for dy := 0; dy < 3; dy++ {
+					ox, oz := cx+s*dz, cz+s*dx
+					w.setLocal(ox, y+dy, oz, Air)
+				}
+				w.setLocal(cx+s*dz, y-1, cz+s*dx, Planks) // plank floor
+			}
+			if k%4 == 0 {
+				// Timber frame: two posts and a beam.
+				for dy := 0; dy < 2; dy++ {
+					w.setLocal(cx-dz, y+dy, cz-dx, Log)
+					w.setLocal(cx+dz, y+dy, cz+dx, Log)
+				}
+				for s := -1; s <= 1; s++ {
+					w.setLocal(cx+s*dz, y+2, cz+s*dx, Planks)
+				}
+				if rand.Intn(3) == 0 {
+					w.setLocal(cx, y+1, cz, Torch)
+				}
+			}
+			if rand.Intn(14) == 0 {
+				w.setLocal(cx+dz, y, cz+dx, Crate)
+			}
+		}
 	}
 	// Stone-brick ruins for cover.
 	ruins := [][2]int{{-22, -22}, {22, -22}, {-22, 22}, {22, 22}, {0, -30}, {0, 30}, {-32, 0}, {32, 0}, {-14, 34}, {36, -14}}
@@ -1729,6 +1779,9 @@ func (w *World) RandomFreePoint(from rl.Vector3, minDist float32) rl.Vector3 {
 		h := w.Ground[lz*worldW+lx]
 		if h != w.Height[lz*worldW+lx] || h <= seaLevel {
 			continue // under water or under a canopy
+		}
+		if g := w.getLocal(lx, h-1, lz); g == Leaves || g == SpruceLeaves || g == Log || g == BirchLog {
+			continue // on top of a tree
 		}
 		p := rl.NewVector3(float32(lx+originX)+0.5, float32(h), float32(lz+originZ)+0.5)
 		if h+2 < worldH && w.getLocal(lx, h+1, lz) == Air && w.PointFree(p, 0.5) &&
