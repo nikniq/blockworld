@@ -156,6 +156,8 @@ type Msg struct {
 		Amount  int
 		Cause   string
 		Armored bool
+		From    rl.Vector3
+		Knock   float32
 	}
 	Score *struct {
 		Points int
@@ -170,6 +172,7 @@ type Msg struct {
 	Leave *struct{ ID uint32 }
 	Text  *struct{ Text string }
 	Chat  *struct{ From, Text string }
+	Shoot *struct{ Pos, Vel rl.Vector3 }
 }
 
 // peer is one connection with a locked encoder.
@@ -470,6 +473,8 @@ func (g *Game) hostHandle(from uint32, m *Msg) {
 		}
 	case m.Prime != nil:
 		g.primeTNT(m.Prime.X, m.Prime.Y, m.Prime.Z, 2.5)
+	case m.Shoot != nil:
+		g.Arrows = append(g.Arrows, Arrow{Pos: m.Shoot.Pos, Vel: m.Shoot.Vel, Life: 4, Owner: from + 1})
 	case m.Hit != nil:
 		h := m.Hit
 		if h.Enemy != 0 {
@@ -664,6 +669,9 @@ func (g *Game) clientHandle(m *Msg) {
 		g.Audio.Play(g.Audio.Pickup, 0.5)
 	case m.Damage != nil:
 		p.Hurt(m.Damage.Amount, m.Damage.Cause, m.Damage.Armored)
+		if m.Damage.Knock > 0 {
+			p.KnockBack(m.Damage.From, m.Damage.Knock)
+		}
 		g.Audio.Play(g.Audio.Hurt, 0.9)
 	case m.Score != nil:
 		g.Score += m.Score.Points
@@ -822,11 +830,19 @@ func (g *Game) isHost() bool   { return g.Net != nil && g.Net.Role == RoleHost }
 
 // hurtTarget applies damage to whichever player an enemy hit.
 func (g *Game) hurtTarget(id uint32, amount int, cause string, armored bool) {
+	g.hurtTargetFrom(id, amount, cause, armored, rl.Vector3{}, 0)
+}
+
+// hurtTargetFrom is hurtTarget with knockback away from a point.
+func (g *Game) hurtTargetFrom(id uint32, amount int, cause string, armored bool, from rl.Vector3, knock float32) {
 	if id == 0 {
 		if g.Headless {
 			return
 		}
 		g.Player.Hurt(amount, cause, armored)
+		if knock > 0 {
+			g.Player.KnockBack(from, knock)
+		}
 		g.Audio.Play(g.Audio.Hurt, 0.9)
 		return
 	}
@@ -835,6 +851,8 @@ func (g *Game) hurtTarget(id uint32, amount int, cause string, armored bool) {
 			Amount  int
 			Cause   string
 			Armored bool
-		}{amount, cause, armored}})
+			From    rl.Vector3
+			Knock   float32
+		}{amount, cause, armored, from, knock}})
 	}
 }

@@ -22,6 +22,11 @@ block textures and sound effects are generated at startup.
 - **Hunger**: ten drumsticks next to the hearts drain as you move, sprint, jump and swim. Below a third you
   cannot sprint; empty, you starve. Eat raw meat, cooked meat (craft from meat and coal) or apples that
   drop from leaves. A full stomach heals you faster.
+- **Farming**: tall grass drops wheat seeds. Plant them on grass or dirt in the light; they sprout, grow
+  and ripen into wheat. Three wheat bake into bread. Ripe wheat drops seeds to replant.
+- **Bow and arrows**: craft a bow from planks and wool and arrows from planks and gravel. Arrows arc
+  with gravity, do double damage on headshots, and work online.
+- Snow falls instead of rain over snowy ground, and hits knock you back.
 - **Achievements**: fourteen goals from breaking your first block to slaying a giant, with a toast when
   earned and a list on K. They persist across worlds.
 - Blocks crack progressively as you mine them, and a gentle generated music loop plays in the world

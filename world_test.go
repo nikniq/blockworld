@@ -185,8 +185,8 @@ func TestAtlas(t *testing.T) {
 			if c.A == 255 {
 				t.Errorf("%s should be translucent", blocks[b].Name)
 			}
-		} else if blocks[b].Tiny {
-			continue // plants are alpha-cutout tiles
+		} else if blocks[b].Tiny || blocks[b].Item {
+			continue // plants and items are alpha-cutout tiles
 		} else if c.A != 255 {
 			t.Errorf("%s tile is transparent", blocks[b].Name)
 		}
@@ -553,5 +553,60 @@ func TestCreativeMode(t *testing.T) {
 	if len(g.targets()) != 1 || g.targets()[0].ID != 0 {
 		// A creative player is still a fallback target when nobody else exists.
 		t.Fatalf("targets %v", g.targets())
+	}
+}
+
+// Crops grow in stages, wheat bakes into bread, and the bow fires arrows that hurt hostiles.
+func TestFarmingAndBow(t *testing.T) {
+	rand.Seed(13)
+	g := &Game{Audio: &Audio{}, CraftHover: -1}
+	g.Reset()
+	w := g.World
+	x, z := 12, 12
+	y := w.SurfaceY(x, z)
+	for yy := y; yy < y+3; yy++ {
+		w.Set(x, yy, z, Air)
+	}
+	w.Set(x, y-1, z, Dirt)
+	w.Set(x, y, z, Seeds)
+	grown := false
+	for i := 0; i < 400 && !grown; i++ {
+		g.GrowCD = 0
+		g.growSaplings(0.1)
+		grown = w.Get(x, y, z) == Wheat
+	}
+	if !grown {
+		t.Fatal("seeds should ripen into wheat")
+	}
+	p := g.Player
+	p.Inv[WheatItem] = 3
+	for i := range recipes {
+		if recipes[i].Out == Bread && recipes[i].CanCraft(p) {
+			recipes[i].Craft(p)
+		}
+	}
+	if p.Inv[Bread] != 1 || blocks[Bread].Food == 0 {
+		t.Fatal("three wheat should bake one loaf")
+	}
+	// Bow: an arrow flying into a zombie hurts it.
+	e := NewEnemy(rl.NewVector3(20.5, 30, 20.5), KindZombie, 1)
+	g.Enemies = append(g.Enemies, e)
+	g.Arrows = append(g.Arrows, Arrow{Pos: rl.NewVector3(20.5, 31, 17), Vel: rl.NewVector3(0, 0, 30), Life: 2, Owner: 1})
+	hp := e.HP
+	for i := 0; i < 10; i++ {
+		g.updateArrows(0.02)
+	}
+	if e.HP >= hp {
+		t.Fatalf("arrow should hurt the zombie: %d -> %d", hp, e.HP)
+	}
+	p.Inv[Bow] = 1
+	hasBow := false
+	for _, it := range p.Hotbar() {
+		if it.Kind == ItemBow {
+			hasBow = true
+		}
+	}
+	if !hasBow {
+		t.Fatal("bow should appear on the hotbar")
 	}
 }

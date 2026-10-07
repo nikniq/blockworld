@@ -578,7 +578,7 @@ func (g *Game) blast(pos rl.Vector3, r, dmg float32) {
 	reach := r * 2.5
 	for _, t := range g.targets() {
 		if d := rl.Vector3Distance(pos, rl.Vector3Add(t.Pos, rl.NewVector3(0, 0.9, 0))); d < reach {
-			g.hurtTarget(t.ID, int(dmg*(1-d/reach)*damageScale()), "was blown up", true)
+			g.hurtTargetFrom(t.ID, int(dmg*(1-d/reach)*damageScale()), "was blown up", true, pos, 8*(1-d/reach))
 		}
 	}
 	for _, e := range g.Enemies {
@@ -738,7 +738,7 @@ func (g *Game) updateBuilder(dt float32) {
 		target := w.Get(x, y, z)
 		held := &blocks[p.Held.Block]
 		free := target == Air || (target.Liquid() && !held.Tiny)
-		if p.Held.Block == Sapling {
+		if p.Held.Block == Sapling || p.Held.Block == Seeds {
 			below := w.Get(x, y-1, z)
 			free = free && (below == Grass || below == Dirt)
 		}
@@ -780,6 +780,12 @@ func (g *Game) breakBlock(x, y, z int) {
 	}
 	if b == Leaves && rand.Float32() < 0.06 {
 		g.spawnDrop(centre, Apple, 0)
+	}
+	if b == TallGrass && rand.Float32() < 0.3 {
+		g.spawnDrop(centre, Seeds, 0)
+	}
+	if b == Wheat && rand.Float32() < 0.6 {
+		g.spawnDrop(centre, Seeds, 0) // extra seeds to replant
 	}
 	if !g.Headless && !g.isClient() {
 		g.MinedCount++
@@ -995,16 +1001,27 @@ func (g *Game) growSaplings(dt float32) {
 	g.GrowCD = 3
 	w := g.World
 	for i, b := range w.Blocks {
-		if b != Sapling {
+		if b != Sapling && b != Seeds && b != WheatGrowing {
 			continue
 		}
 		x := i % worldW
 		z := (i / worldW) % worldD
 		y := i / (worldW * worldD)
+		wx, wz := x+originX, z+originZ
+		switch b {
+		case Seeds, WheatGrowing:
+			if w.sunLocal(x, y, z) >= 8 && rand.Float32() < 0.08 {
+				next := WheatGrowing
+				if b == WheatGrowing {
+					next = Wheat
+				}
+				w.Set(wx, y, wz, next)
+			}
+			continue
+		}
 		if w.sunLocal(x, y, z) < 8 || rand.Float32() > 0.05 {
 			continue
 		}
-		wx, wz := x+originX, z+originZ
 		if !g.blockOccupied(wx, y, wz) && w.GrowTree(wx, y, wz) {
 			g.burst(rl.NewVector3(float32(wx)+0.5, float32(y)+1, float32(wz)+0.5), rl.Lime, 10)
 		}
@@ -1236,6 +1253,14 @@ func (g *Game) update(dt float32) {
 		if p.TryAttack() {
 			g.attack()
 		}
+	case ItemBow:
+		p.Mining = false
+		p.Aim.Hit = false
+		if p.TryShootBow() {
+			g.playerShoot()
+		} else if attackPressed() && p.Inv[ArrowItem] == 0 && !settings.Creative {
+			g.say("No arrows - craft them from planks and gravel", 1.5)
+		}
 	default:
 		g.updateBuilder(dt)
 	}
@@ -1294,7 +1319,7 @@ func (g *Game) worldUpdate(dt float32) {
 	for _, e := range g.Enemies {
 		fuseBefore := e.Fuse
 		if d := e.Update(dt, g.World, g.Nav, g.nearestTarget(e.Pos), g.Enemies); d > 0 {
-			g.hurtTarget(e.TargetID, int(float32(d)*damageScale()+0.5), "was slain by a "+e.Spec.Name, true)
+			g.hurtTargetFrom(e.TargetID, int(float32(d)*damageScale()+0.5), "was slain by a "+e.Spec.Name, true, e.Pos, 5)
 		}
 		if fuseBefore == 0 && e.Fuse > 0 {
 			g.Audio.Play(g.Audio.Fuse, 0.8)
@@ -1497,7 +1522,8 @@ func (g *Game) draw3D() {
 	g.Sky.DrawClouds(cam, float32(rl.GetTime()))
 	w.EndShader()
 	if !p.HeadWater && w.SkyExposed(p.Eye()) {
-		g.Sky.DrawRain(cam, float32(rl.GetTime()))
+		top := w.Get(floorI(p.Pos.X), w.SurfaceY(floorI(p.Pos.X), floorI(p.Pos.Z))-1, floorI(p.Pos.Z))
+		g.Sky.DrawRain(cam, float32(rl.GetTime()), top == Snow)
 	}
 	for _, e := range g.Enemies {
 		e.DrawGlow()
@@ -1597,6 +1623,20 @@ func (g *Game) drawWeapon() {
 		rl.DrawTexturePro(tex, TileRect(b, 0), rl.NewRectangle(rx, ry-34, 130, 34), rl.Vector2{}, 0, rl.NewColor(255, 255, 255, 255))
 		rl.DrawRectangleLines(int32(rx), int32(ry-34), 130, 164, rl.NewColor(0, 0, 0, 160))
 		return
+	case ItemBow:
+		rx := sw*0.70 + bobX
+		ry := sh - 90 + bobY
+		rot := float32(-20) + swing*25
+		rl.DrawRectanglePro(rl.NewRectangle(rx+30, ry+60, 80, 200), rl.NewVector2(40, 0), rot*0.4, skin)
+		wood := rl.NewColor(130, 90, 50, 255)
+		rl.DrawRectanglePro(rl.NewRectangle(rx, ry, 18, 260), rl.NewVector2(9, 130), rot, wood)
+		rl.DrawRectanglePro(rl.NewRectangle(rx, ry-120, 60, 18), rl.NewVector2(0, 9), rot-50, wood)
+		rl.DrawRectanglePro(rl.NewRectangle(rx, ry+120, 60, 18), rl.NewVector2(0, 9), rot+50, wood)
+		rl.DrawLineEx(rl.NewVector2(rx+45, ry-150), rl.NewVector2(rx+45, ry+150), 2, rl.NewColor(235, 235, 225, 255))
+		if p.Inv[ArrowItem] > 0 || settings.Creative {
+			rl.DrawRectanglePro(rl.NewRectangle(rx-10, ry, 120, 6), rl.NewVector2(60, 3), rot+90, rl.NewColor(190, 170, 130, 255))
+		}
+		return
 	case ItemPickaxe, ItemSword:
 		rx := sw*0.72 + bobX
 		ry := sh - 60 + bobY
@@ -1663,8 +1703,13 @@ func (g *Game) drawHotbar(sw, sh int32) {
 				drawSwordIcon(cx, cy, slot*0.9, p.SwordTier)
 			case ItemPickaxe:
 				drawPickIcon(cx, cy, slot*0.9, p.PickTier)
-			case ItemBlock, ItemFood:
+			case ItemBlock, ItemFood, ItemBow:
 				g.drawBlockIcon(it.Block, x+9, y0+9, slot-18)
+				if it.Kind == ItemBow {
+					cnt := fmt.Sprintf("%d", p.Inv[ArrowItem])
+					tw := rl.MeasureText(cnt, 16)
+					rl.DrawText(cnt, x+slot-tw-4, y0+slot-19, 16, rl.White)
+				}
 				cnt := fmt.Sprintf("%d", p.Inv[it.Block])
 				if settings.Creative {
 					cnt = "oo"
@@ -1694,6 +1739,8 @@ func (g *Game) drawHotbar(sw, sh int32) {
 		name = blocks[p.Held.Block].Name
 	case ItemFood:
 		name = blocks[p.Held.Block].Name + "  (right click to eat)"
+	case ItemBow:
+		name = fmt.Sprintf("Bow  (%d arrows)", p.Inv[ArrowItem])
 	}
 	if len(hb) > hotbarSlots {
 		name += "   (wheel scrolls)"

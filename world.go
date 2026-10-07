@@ -57,6 +57,13 @@ const (
 	TallGrass
 	Flower
 	Leather
+	Seeds
+	WheatGrowing
+	Wheat
+	WheatItem
+	Bread
+	Bow
+	ArrowItem
 	Spawner
 	Crate
 	Bedrock
@@ -98,6 +105,7 @@ var (
 	saplingBox = [2][3]float32{{0.3, 0, 0.3}, {0.7, 0.8, 0.7}}
 	ladderBox  = [2][3]float32{{0.25, 0, 0.25}, {0.75, 1, 0.75}}
 	plantBox   = [2][3]float32{{0.15, 0, 0.15}, {0.85, 0.85, 0.85}}
+	cropBox    = [2][3]float32{{0.15, 0, 0.15}, {0.85, 0.3, 0.85}}
 )
 
 // Biomes decide the surface blocks and vegetation of a column.
@@ -190,6 +198,20 @@ var blocks = [numBlocks]blockInfo{
 		Pat: [3]texPattern{PatFlower, PatFlower, PatFlower}, MineTime: 0.05, Drops: Flower, Tiny: true, Box: &plantBox},
 	Leather: {Name: "Leather", Top: col(150, 95, 55), Side: col(150, 95, 55), Bottom: col(150, 95, 55),
 		Pat: [3]texPattern{PatNoise, PatNoise, PatNoise}, MineTime: 0.1, Drops: Leather, Item: true},
+	Seeds: {Name: "Wheat Seeds", Top: col(120, 190, 80), Side: col(120, 190, 80), Bottom: col(120, 190, 80),
+		Pat: [3]texPattern{PatCrop0, PatCrop0, PatCrop0}, MineTime: 0.05, Drops: Seeds, Tiny: true, Box: &cropBox},
+	WheatGrowing: {Name: "Wheat (growing)", Top: col(110, 180, 70), Side: col(110, 180, 70), Bottom: col(110, 180, 70),
+		Pat: [3]texPattern{PatCrop1, PatCrop1, PatCrop1}, MineTime: 0.05, Drops: Seeds, Tiny: true, Box: &plantBox},
+	Wheat: {Name: "Wheat", Top: col(210, 180, 70), Side: col(210, 180, 70), Bottom: col(210, 180, 70),
+		Pat: [3]texPattern{PatCrop2, PatCrop2, PatCrop2}, MineTime: 0.05, Drops: WheatItem, Tiny: true, Box: &plantBox},
+	WheatItem: {Name: "Wheat", Top: col(215, 185, 80), Side: col(215, 185, 80), Bottom: col(215, 185, 80),
+		Pat: [3]texPattern{PatCrop2, PatCrop2, PatCrop2}, MineTime: 0.1, Drops: WheatItem, Item: true},
+	Bread: {Name: "Bread", Top: col(200, 150, 80), Side: col(200, 150, 80), Bottom: col(200, 150, 80),
+		Pat: [3]texPattern{PatBread, PatBread, PatBread}, MineTime: 0.1, Drops: Bread, Food: 6},
+	Bow: {Name: "Bow", Top: col(130, 90, 50), Side: col(130, 90, 50), Bottom: col(130, 90, 50),
+		Pat: [3]texPattern{PatBow, PatBow, PatBow}, MineTime: 0.1, Drops: Bow, Item: true},
+	ArrowItem: {Name: "Arrow", Top: col(190, 170, 130), Side: col(190, 170, 130), Bottom: col(190, 170, 130),
+		Pat: [3]texPattern{PatArrow, PatArrow, PatArrow}, MineTime: 0.1, Drops: ArrowItem, Item: true},
 	Spawner: {Name: "Monster Spawner", Top: col(40, 44, 50), Side: col(40, 44, 50), Bottom: col(40, 44, 50),
 		Pat: [3]texPattern{PatSpawner, PatSpawner, PatSpawner}, MineTime: 6, Hard: true, Drops: Air, Solid: true},
 	Crate: {Name: "Loot Crate", Top: col(170, 130, 70), Side: col(160, 120, 65), Bottom: col(150, 110, 60),

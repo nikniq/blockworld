@@ -145,19 +145,30 @@ func (s *Sky) DrawSky(cam rl.Camera3D) {
 }
 
 // DrawRain draws falling streaks around the camera; call when the player is under open sky.
-func (s *Sky) DrawRain(cam rl.Camera3D, t float32) {
+func (s *Sky) DrawRain(cam rl.Camera3D, t float32, snow bool) {
 	if s.Rain < 0.05 {
 		return
 	}
 	n := int(260 * s.Rain)
 	c := rl.NewColor(180, 200, 235, uint8(140*s.Rain))
+	speed := float32(14)
+	if snow {
+		c = rl.NewColor(255, 255, 255, uint8(220*s.Rain))
+		speed = 2.5
+		n = n * 2 / 3
+	}
 	for i := 0; i < n; i++ {
 		ox := hash2(i, 1, 55)*16 - 8
 		oz := hash2(i, 2, 55)*16 - 8
-		fall := float32(math.Mod(float64(t*14+hash2(i, 3, 55)*20), 20))
+		fall := float32(math.Mod(float64(t*speed+hash2(i, 3, 55)*20), 20))
 		y := cam.Position.Y + 10 - fall
 		p := rl.NewVector3(cam.Position.X+ox, y, cam.Position.Z+oz)
-		rl.DrawLine3D(p, rl.NewVector3(p.X, p.Y-0.9, p.Z), c)
+		if snow {
+			drift := float32(math.Sin(float64(t*1.5+float32(i)))) * 0.3
+			rl.DrawCube(rl.NewVector3(p.X+drift, p.Y, p.Z), 0.08, 0.08, 0.08, c)
+		} else {
+			rl.DrawLine3D(p, rl.NewVector3(p.X, p.Y-0.9, p.Z), c)
+		}
 	}
 }
 

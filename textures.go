@@ -48,6 +48,12 @@ const (
 	PatSpawner
 	PatCrate
 	PatApple
+	PatCrop0
+	PatCrop1
+	PatCrop2
+	PatBread
+	PatBow
+	PatArrow
 )
 
 const (
@@ -333,6 +339,52 @@ func texel(p texPattern, base rl.Color, info *blockInfo, x, y, seed int) rl.Colo
 		}
 		if y < 4 && x >= 7 && x <= 8 {
 			return mul(rl.NewColor(100, 70, 40, 255), 0.9+0.2*n) // stalk
+		}
+		return rl.NewColor(0, 0, 0, 0)
+	case PatCrop0, PatCrop1, PatCrop2:
+		height := 4
+		if p == PatCrop1 {
+			height = 9
+		} else if p == PatCrop2 {
+			height = 14
+		}
+		stalk := (x*5+seed)%4 == 1
+		if stalk && y >= tileSize-height {
+			if p == PatCrop2 && y < tileSize-height+5 {
+				return mul(rl.NewColor(225, 195, 90, 255), 0.85+0.3*n) // ripe heads
+			}
+			return mul(base, 0.75+0.4*n)
+		}
+		return rl.NewColor(0, 0, 0, 0)
+	case PatBread:
+		dx, dy := float32(x)-7.5, float32(y)-8
+		if dx*dx/36+dy*dy/14 < 1 {
+			if dy < -1 {
+				return mul(rl.NewColor(230, 190, 120, 255), 0.9+0.2*n)
+			}
+			return mul(base, 0.85+0.3*n)
+		}
+		return rl.NewColor(0, 0, 0, 0)
+	case PatBow:
+		// A curve on the left, the string on the right.
+		dx, dy := float32(x)-13, float32(y)-7.5
+		d := float32(math.Sqrt(float64(dx*dx + dy*dy)))
+		if d > 8.5 && d < 10.5 && x < 11 {
+			return mul(base, 0.85+0.3*n)
+		}
+		if x == 12 && y > 1 && y < 14 {
+			return rl.NewColor(235, 235, 225, 255)
+		}
+		return rl.NewColor(0, 0, 0, 0)
+	case PatArrow:
+		if y == 7 || y == 8 {
+			if x < 3 {
+				return rl.NewColor(120, 120, 125, 255) // head
+			}
+			if x > 12 {
+				return rl.NewColor(230, 230, 230, 255) // fletching
+			}
+			return mul(base, 0.85+0.3*n)
 		}
 		return rl.NewColor(0, 0, 0, 0)
 	case PatTorch:

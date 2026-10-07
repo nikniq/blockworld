@@ -39,6 +39,7 @@ const (
 	ItemPickaxe
 	ItemBlock
 	ItemFood
+	ItemBow
 )
 
 // Item is one hotbar entry: a tool, or a stack of blocks from the inventory.
@@ -68,6 +69,8 @@ type Player struct {
 	Stepped   bool    // a footstep landed this frame (the game plays the sound)
 	Hunger    float32 // 0..20, drains with time and effort
 	StarveT   float32
+	Knock     rl.Vector3 // knockback velocity from a hit
+	BowCD     float32
 	Flying    bool    // creative flight
 	JumpTapT  float32 // seconds since the last jump press (double tap toggles flight)
 	Sneak     bool
@@ -178,6 +181,8 @@ func (p *Player) Hotbar() []Item {
 			items = append(items, Item{ItemBlock, b})
 		} else if p.Inv[b] > 0 && blocks[b].Food > 0 {
 			items = append(items, Item{ItemFood, b})
+		} else if b == Bow && p.Inv[b] > 0 {
+			items = append(items, Item{ItemBow, b})
 		}
 	}
 	return items
@@ -365,6 +370,10 @@ func (p *Player) Update(dt float32, w *World) {
 		m := rl.Vector3Scale(rl.Vector3Normalize(move), speed*dt)
 		delta.X, delta.Z = m.X, m.Z
 	}
+	// Knockback fades out over a few tenths of a second.
+	delta.X += p.Knock.X * dt
+	delta.Z += p.Knock.Z * dt
+	p.Knock = rl.Vector3Scale(p.Knock, max(0, 1-dt*7))
 
 	// Vertical: fly, swim in water, otherwise jump and fall.
 	if p.Flying {
@@ -473,6 +482,7 @@ func (p *Player) Update(dt float32, w *World) {
 	// Timers.
 	p.FireCD = max(0, p.FireCD-dt)
 	p.AttackCD = max(0, p.AttackCD-dt)
+	p.BowCD = max(0, p.BowCD-dt)
 	p.Recoil = lerp(p.Recoil, 0, dt*12)
 	p.DmgFlash = max(0, p.DmgFlash-dt*2)
 	p.Swing = max(0, p.Swing-dt*4)
@@ -556,6 +566,37 @@ func (p *Player) TryFire() bool {
 		p.StartReload()
 	}
 	return true
+}
+
+// TryShootBow returns true if an arrow leaves the bow this frame.
+func (p *Player) TryShootBow() bool {
+	if p.Held.Kind != ItemBow || !attackDown() || p.BowCD > 0 {
+		return false
+	}
+	if p.Inv[ArrowItem] <= 0 && !settings.Creative {
+		return false
+	}
+	if !settings.Creative {
+		p.Inv[ArrowItem]--
+	}
+	p.BowCD = 0.7
+	p.Swing = 1
+	return true
+}
+
+// KnockBack shoves the player away from a point and hops them slightly.
+func (p *Player) KnockBack(from rl.Vector3, strength float32) {
+	d := rl.Vector3Subtract(p.Pos, from)
+	d.Y = 0
+	if l := rl.Vector3Length(d); l > 0.01 {
+		d = rl.Vector3Scale(d, strength/l)
+	} else {
+		d = rl.Vector3Scale(p.FlatForward(), -strength)
+	}
+	p.Knock = rl.Vector3Add(p.Knock, d)
+	if p.OnGround && !p.Flying {
+		p.VelY = max(p.VelY, 3.5)
+	}
 }
 
 // TryAttack returns true if a sword swing starts this frame.

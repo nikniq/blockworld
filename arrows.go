@@ -8,10 +8,13 @@ import (
 
 // Arrow is a skeleton's projectile.
 type Arrow struct {
-	Pos  rl.Vector3
-	Vel  rl.Vector3
-	Life float32
+	Pos   rl.Vector3
+	Vel   rl.Vector3
+	Life  float32
+	Owner uint32 // 0: a hostile's arrow; otherwise the player id + 1 that shot it
 }
+
+const playerArrowDamage = 4
 
 const arrowDamage = 6
 
@@ -29,6 +32,57 @@ func (g *Game) shootArrow(from rl.Vector3, target rl.Vector3) {
 	g.Audio.Play(g.Audio.Swing, 0.5)
 }
 
+// playerShoot fires the local player's bow (solo and host) or asks the host to (client).
+func (g *Game) playerShoot() {
+	p := g.Player
+	from := rl.Vector3Add(p.Eye(), rl.Vector3Scale(p.Forward(), 0.5))
+	vel := rl.Vector3Scale(p.Forward(), 28)
+	g.Audio.Play(g.Audio.Swing, 0.6)
+	if g.isClient() {
+		g.sendToHost(&Msg{Shoot: &struct{ Pos, Vel rl.Vector3 }{from, vel}})
+		return
+	}
+	g.Arrows = append(g.Arrows, Arrow{Pos: from, Vel: vel, Life: 4, Owner: 1})
+}
+
+// arrowHitsCreature applies a player's arrow to the first hostile or animal on its path.
+func (g *Game) arrowHitsCreature(a *Arrow, ray rl.Ray, step float32) bool {
+	for _, e := range g.Enemies {
+		if !e.Alive {
+			continue
+		}
+		if c := rl.GetRayCollisionBox(ray, e.BB()); c.Hit && c.Distance <= step {
+			g.burst(a.Pos, rl.NewColor(255, 80, 80, 255), 6)
+			head := rl.GetRayCollisionSphere(ray, e.HeadCenter(), e.Spec.HeadR)
+			dmg := playerArrowDamage
+			if head.Hit {
+				dmg *= 2
+			}
+			if e.Hit(dmg) {
+				if a.Owner == 1 {
+					g.killEnemy(e, e.Spec.Points)
+				} else {
+					g.killEnemyFor(e, e.Spec.Points, a.Owner-1)
+				}
+			}
+			return true
+		}
+	}
+	for _, an := range g.Animals {
+		if !an.Alive {
+			continue
+		}
+		if c := rl.GetRayCollisionBox(ray, an.BB()); c.Hit && c.Distance <= step {
+			g.burst(a.Pos, rl.NewColor(255, 80, 80, 255), 6)
+			if an.Hit(playerArrowDamage) {
+				g.killAnimal(an)
+			}
+			return true
+		}
+	}
+	return false
+}
+
 func (g *Game) updateArrows(dt float32) {
 	keep := g.Arrows[:0]
 	for i := range g.Arrows {
@@ -40,14 +94,18 @@ func (g *Game) updateArrows(dt float32) {
 		if a.Life <= 0 {
 			continue
 		}
-		// Hit a player?
 		ray := rl.NewRay(a.Pos, rl.Vector3Normalize(step))
 		hit := false
-		for _, t := range g.targets() {
-			if c := rl.GetRayCollisionBox(ray, t.Box); c.Hit && c.Distance <= rl.Vector3Length(step) {
-				g.hurtTarget(t.ID, int(float32(arrowDamage)*damageScale()+0.5), "was shot by a Skeleton", true)
-				hit = true
-				break
+		if a.Owner != 0 {
+			hit = g.arrowHitsCreature(a, ray, rl.Vector3Length(step))
+		} else {
+			// A hostile's arrow: hit a player?
+			for _, t := range g.targets() {
+				if c := rl.GetRayCollisionBox(ray, t.Box); c.Hit && c.Distance <= rl.Vector3Length(step) {
+					g.hurtTargetFrom(t.ID, int(float32(arrowDamage)*damageScale()+0.5), "was shot by a Skeleton", true, rl.Vector3Subtract(a.Pos, step), 4)
+					hit = true
+					break
+				}
 			}
 		}
 		if hit {
