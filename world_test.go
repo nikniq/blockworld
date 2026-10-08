@@ -1323,3 +1323,43 @@ func TestModes(t *testing.T) {
 		t.Fatal("battle mode should start armed and at war")
 	}
 }
+
+// Chests hold stacks and ammo, spill when broken, and catch a dead player's belongings.
+func TestChests(t *testing.T) {
+	rand.Seed(29)
+	g := &Game{Audio: &Audio{}, CraftHover: -1}
+	g.Reset()
+	p, w := g.Player, g.World
+	x, z := floorI(g.Spawn.X)+2, floorI(g.Spawn.Z)
+	y := w.SurfaceY(x, z)
+	w.Set(x, y, z, ChestBlock)
+	c := g.chestAt(x, y, z)
+	c.Items[IronOre] = 4
+	c.Ammo = 10
+	if g.chestAt(x, y, z) != c {
+		t.Fatal("chest lookup should be stable")
+	}
+	g.breakBlock(x, y, z)
+	iron, ammo := 0, 0
+	for _, d := range g.Drops {
+		if d.Block == IronOre {
+			iron += d.Count
+		}
+		ammo += d.Ammo
+	}
+	if iron != 4 || ammo != 10 || len(g.Chests) != 0 {
+		t.Fatalf("breaking should spill: iron %d ammo %d chests %d", iron, ammo, len(g.Chests))
+	}
+	p.Inv[Cobble], p.Ammo, p.Reserve = 20, 0, 30
+	p.Pos = rl.NewVector3(float32(x)+0.5, float32(y), float32(z)+0.5)
+	if !g.deathChest(p.Pos) {
+		t.Fatal("death chest should be placed")
+	}
+	var dc *Chest
+	for _, ch := range g.Chests {
+		dc = ch
+	}
+	if dc == nil || dc.Items[Cobble] != 20 || dc.Ammo != 30 || p.Inv[Cobble] != 0 || p.Reserve != 0 {
+		t.Fatal("death chest should hold everything")
+	}
+}

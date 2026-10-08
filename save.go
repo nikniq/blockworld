@@ -10,7 +10,7 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-const saveVersion = 11
+const saveVersion = 12
 
 // SaveData is the persisted state of a run: the whole voxel volume, the
 // player, the clock and the animals. Hostiles and drops are not kept.
@@ -40,6 +40,7 @@ type SaveData struct {
 	WarBlue   bool
 	Mode      int
 	Hordes    int
+	Chests    map[ChestKey]*Chest
 	Hunger    float32
 	SkyT      float32
 	Day       int
@@ -119,7 +120,7 @@ func (g *Game) saveErr() error {
 		Pos: pl.Pos, Yaw: pl.Yaw, Pitch: pl.Pitch, HP: pl.HP, Ammo: pl.Ammo, Reserve: pl.Reserve,
 		Inv: pl.Inv[:], SwordTier: pl.SwordTier, PickTier: pl.PickTier, ArmorTier: pl.ArmorTier,
 		Spawn: g.Spawn, Deaths: g.Deaths, Hunger: pl.Hunger, Won: g.Won, Lost: g.VillagersLost,
-		Flags: g.Flags, Villages: g.Villages, WarRed: g.WarRed, WarBlue: g.WarBlue, Mode: settings.Mode, Hordes: g.Hordes,
+		Flags: g.Flags, Villages: g.Villages, WarRed: g.WarRed, WarBlue: g.WarBlue, Mode: settings.Mode, Hordes: g.Hordes, Chests: g.Chests,
 		SkyT: g.Sky.T, Day: g.Sky.Day, Night: g.Night, Score: g.Score, Kills: g.Kills,
 	}
 	for _, a := range g.Animals {
@@ -184,6 +185,9 @@ func (g *Game) load() bool {
 	settings.Mode = d.Mode
 	settings.applyMode()
 	g.Hordes = d.Hordes
+	if d.Chests != nil {
+		g.Chests = d.Chests
+	}
 	pl.Hunger = d.Hunger
 	pl.EnsureHeld()
 	g.Sky.T, g.Sky.Day = d.SkyT, d.Day

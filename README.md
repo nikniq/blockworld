@@ -100,6 +100,9 @@ block textures and sound effects are generated at startup.
   armour, diamonds or a diamond sword. Their mood shifts with the hour, the weather, their wounds and
   your deeds. Villagers also chat to each other and to you as you pass. Killing a villager costs 200
   points and the whole village holds a grudge for a while.
+- **Chests**: eight planks. Right click to open a two-column screen, click a row to move a whole stack
+  between your inventory and the chest (Shift moves eight), and break the chest to spill it. When you
+  die your blocks and ammo go into a chest at the spot, so nothing is lost to the grass.
 - **Doors**: four planks make a door. Right click opens and closes it; closed doors stop hostiles and arrows.
 - **Wandering trader**: a robed visitor turns up every couple of days and wanders off again. Right click to
   trade: gold ore for rifle ammo, iron for diamonds, wool for bread, coal for TNT, and more.

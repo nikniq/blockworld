@@ -94,6 +94,7 @@ const (
 	Boat
 	FlagPost
 	FlagItem
+	ChestBlock
 	DeepStone
 	Mud
 	Meteorite
@@ -299,6 +300,8 @@ var blocks = [numBlocks]blockInfo{
 		Pat: [3]texPattern{PatNoise, PatLogSide, PatNoise}, MineTime: 1.5, Drops: FlagItem, Tiny: true, Box: &flagBox, Emit: 5},
 	FlagItem: {Name: "Village Flag", Top: col(240, 200, 50), Side: col(240, 200, 50), Bottom: col(240, 200, 50),
 		Pat: [3]texPattern{PatFlag, PatFlag, PatFlag}, MineTime: 0.1, Drops: FlagItem, Item: true},
+	ChestBlock: {Name: "Chest", Top: col(140, 100, 55), Side: col(135, 95, 50), Bottom: col(120, 85, 45),
+		Pat: [3]texPattern{PatCrate, PatCrate, PatCrate}, MineTime: 1.2, Drops: ChestBlock, Solid: true},
 	DeepStone: {Name: "Deep Stone", Top: col(70, 72, 80), Side: col(66, 68, 76), Bottom: col(60, 62, 70),
 		Pat: [3]texPattern{PatNoise, PatNoise, PatNoise}, MineTime: 4.5, Hard: true, Drops: Cobble, Solid: true},
 	Glowshroom: {Name: "Glowshroom", Top: col(120, 200, 230), Side: col(120, 200, 230), Bottom: col(120, 200, 230),

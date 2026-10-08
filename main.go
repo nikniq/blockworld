@@ -40,6 +40,7 @@ const (
 	StateJoin
 	StateTrade
 	StateDialog
+	StateChest
 )
 
 var playerName string
@@ -107,6 +108,9 @@ type Game struct {
 	Talking        *Animal
 	Mount          *Animal
 	Flags          []Flag
+	Chests         map[ChestKey]*Chest
+	OpenChest      *Chest
+	OpenChestPos   [3]int
 	Villages       []Village
 	WarRed         bool // the player has fought Red (captured a flag or killed a villager)
 	WarBlue        bool
@@ -209,6 +213,7 @@ func (g *Game) Reset() {
 	g.spawnDinosaur()
 	g.spawnVillagers()
 	g.WarRed, g.WarBlue = false, false
+	g.Chests = map[ChestKey]*Chest{}
 	g.setupFactions()
 	settings.applyMode()
 	g.Hordes, g.HordeCD, g.Survived = 0, 25, 0
@@ -834,6 +839,10 @@ func (g *Game) updateBuilder(dt float32) {
 	} else {
 		p.Mining = false
 	}
+	if usePressed() && w.Get(a.X, a.Y, a.Z) == ChestBlock {
+		g.openChest(a.X, a.Y, a.Z)
+		return
+	}
 	if usePressed() && w.Get(a.X, a.Y, a.Z) == FlagPost {
 		if f := g.flagAt(a.X, a.Y, a.Z); f != nil {
 			if f.Faction == FactionPlayer {
@@ -937,6 +946,9 @@ func (g *Game) breakBlock(x, y, z int) {
 	b := g.World.Get(x, y, z)
 	if b == Air {
 		return
+	}
+	if b == ChestBlock {
+		g.breakChest(x, y, z)
 	}
 	if b == FlagPost {
 		f := g.flagAt(x, y, z)
@@ -1087,6 +1099,10 @@ func (g *Game) soak(frame int) bool {
 	if frame%120 == 0 {
 		x, z := floorI(p.Pos.X)+rand.Intn(9)-4, floorI(p.Pos.Z)+rand.Intn(9)-4
 		y := w.SurfaceY(x, z)
+		w.Set(x+3, y, z, ChestBlock)
+		c := g.chestAt(x+3, y, z)
+		c.Items[Cobble] += 5
+		g.breakBlock(x+3, y, z)
 		w.Set(x, y-1, z, Dirt)
 		w.Set(x, y, z, Sapling)
 		w.Set(x+1, y, z, Bed)
@@ -1286,7 +1302,9 @@ func (g *Game) burnInLava(dt float32) {
 func (g *Game) respawn() {
 	p := g.Player
 	at := rl.NewVector3(p.Pos.X, p.Pos.Y+0.5, p.Pos.Z)
-	if g.isClient() {
+	if !g.isClient() && g.deathChest(p.Pos) {
+		// stowed; nothing to scatter
+	} else if g.isClient() {
 		da := &struct {
 			Pos    rl.Vector3
 			Blocks [numBlocks]int
@@ -1314,7 +1332,9 @@ func (g *Game) respawn() {
 	p.DmgFlash = 0
 	p.EnsureHeld()
 	g.State = StatePlaying
-	g.say(fmt.Sprintf("Respawned. Your items lie at %d, %d, %d", floorI(at.X), floorI(at.Y), floorI(at.Z)), 4)
+	if g.MsgT <= 0 {
+		g.say(fmt.Sprintf("Respawned. Your items lie at %d, %d, %d", floorI(at.X), floorI(at.Y), floorI(at.Z)), 4)
+	}
 	if !g.isClient() {
 		g.save()
 	}
@@ -2722,7 +2742,8 @@ func (g *Game) drawHelp(sw, sh int32) {
 		"1-9 / wheel: hotbar   " + attack + ": shoot, swing, mine   " + use + ": place, eat, use bed   (B in pause swaps)",
 		"E crafting   R reload   F5 third person   F11 fullscreen   ESC pause and settings",
 		"Torches keep hostiles from rising nearby. Undead burn at sunrise. Creepers explode.",
-		"Beds set your spawn point and skip the night. Dying drops your items where you fell.",
+		"Beds set your spawn point and skip the night. Dying stows your items in a chest where you fell.",
+		"Chests (8 planks): right click to open, click rows to move stacks across, SHIFT moves 8.",
 		"Hunger drains as you move; eat meat and apples (right click). Cook meat with coal (E). Full stomach heals.",
 		"Online: T chat   P player list      Creative mode (G in pause): fly with double-tap SPACE, build freely",
 		"K achievements   N (pause) music on/off      Doors: 4 planks, right click to open. Trader: right click to trade",
@@ -3700,6 +3721,11 @@ func main() {
 					g.JoinText = settings.LastJoin
 				}
 			}
+		case StateChest:
+			g.updateChest()
+			if g.isHost() {
+				g.update(0)
+			}
 		case StateDialog:
 			g.updateDialog()
 			if g.isHost() {
@@ -3814,6 +3840,9 @@ func main() {
 		case StateDialog:
 			g.drawHUD()
 			g.drawDialog()
+		case StateChest:
+			g.drawHUD()
+			g.drawChest()
 		default:
 			g.drawHUD()
 			g.drawOverlay()
