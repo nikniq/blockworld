@@ -186,6 +186,8 @@ func (g *Game) Reset() {
 	g.spawnDinosaur()
 	g.spawnVillagers()
 	g.spawnWolves(4)
+	g.spawnWildlife(12)
+	g.spawnWaterLife(6)
 	g.Won = false
 	g.say("Day 1  -  mine, craft and build before dark. Find and light the ancient beacon.", 5)
 }
@@ -1411,6 +1413,9 @@ func (g *Game) worldUpdate(dt float32) {
 		g.nightfall()
 	} else if !night && g.WasNight {
 		g.dawn()
+		if !g.Headless {
+			g.kookaburra()
+		}
 	}
 	g.WasNight = night
 	if night && g.SpawnLeft > 0 {
@@ -2434,6 +2439,7 @@ func (g *Game) drawHelp(sw, sh int32) {
 		"Villages: right click a villager (?) for a quest. Guards fight the undead; keep the others safe.",
 		"Goal: find the ancient beacon tower (see the compass) and light it with 3 diamond ore.",
 		"Wolves: feed one meat or fish twice to tame it. Fishing rod: planks and wool; cast at water.",
+		"Outback: red sand, eucalyptus, kangaroos, emus, wombats. Koalas and platypuses are protected. Mind the crocodiles.",
 		"H closes this help",
 	}
 	w := int32(760)
@@ -3017,9 +3023,9 @@ func (g *Game) scriptedShots(frame int) bool {
 			t.WanderT = 99
 			g.Animals = append(g.Animals, t)
 		}
-		for i, k := range []AnimalKind{AnimalPig, AnimalCow, AnimalSheep, AnimalDino} {
-			p := rl.Vector3Add(g.Player.Pos, rl.Vector3Scale(g.Player.FlatForward(), 4+float32(i)*1.5))
-			p.X += float32(i)*2 - 2
+		for i, k := range []AnimalKind{AnimalKangaroo, AnimalEmu, AnimalKoala, AnimalCrocodile, AnimalWombat, AnimalPlatypus, AnimalDino} {
+			p := rl.Vector3Add(g.Player.Pos, rl.Vector3Scale(g.Player.FlatForward(), 4+float32(i)*0.8))
+			p.X += float32(i)*1.6 - 5
 			if k == AnimalDino {
 				p = rl.Vector3Add(g.Player.Pos, rl.Vector3Scale(g.Player.FlatForward(), 6))
 				p.X -= 3

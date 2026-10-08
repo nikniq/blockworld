@@ -31,6 +31,12 @@ const (
 	SkinGuard
 	SkinLibrarian
 	SkinWolf
+	SkinKangaroo
+	SkinEmu
+	SkinKoala
+	SkinWombat
+	SkinPlatypus
+	SkinCroc
 	numSkins
 )
 
@@ -320,6 +326,84 @@ func paintSkin(kind SkinKind, part, face, x, y int) rl.Color {
 			}
 		}
 		return shade(fur)
+	case SkinKangaroo:
+		fur := col(172, 122, 82)
+		if face == 1 || (part == PartBody && face == 4 && x > 4 && x < 11) {
+			fur = col(210, 180, 140) // pale belly
+		}
+		if part == PartHead && face == 4 {
+			if y >= 11 && x >= 6 && x <= 9 {
+				return col(40, 30, 30) // nose
+			}
+			return eyes(fur, col(30, 25, 20), false)
+		}
+		return shade(fur)
+	case SkinEmu:
+		fur := col(90, 82, 72)
+		if hash2(x, y/2, 91) < 0.3 {
+			fur = col(70, 62, 55)
+		}
+		if part == PartHead {
+			if face == 4 && y >= 8 {
+				return col(40, 40, 40) // beak
+			}
+			return eyes(col(100, 110, 140), col(240, 200, 60), false)
+		}
+		if part == PartArmL {
+			return shade(col(100, 110, 140)) // blue neck
+		}
+		return shade(fur)
+	case SkinKoala:
+		fur := col(140, 140, 145)
+		if part == PartHead {
+			if face == 4 {
+				if y >= 8 && y <= 11 && x >= 6 && x <= 9 {
+					return col(30, 30, 30) // big nose
+				}
+				return eyes(fur, col(30, 30, 30), true)
+			}
+			if face == 0 && (x <= 4 || x >= 11) {
+				return shade(col(200, 200, 205)) // fluffy ears
+			}
+		}
+		if face == 1 {
+			return shade(col(220, 220, 220))
+		}
+		return shade(fur)
+	case SkinWombat:
+		fur := col(110, 85, 65)
+		if part == PartHead && face == 4 {
+			if y >= 10 && x >= 5 && x <= 10 {
+				return col(50, 40, 35) // broad nose
+			}
+			return eyes(fur, col(25, 20, 20), false)
+		}
+		return shade(fur)
+	case SkinPlatypus:
+		if part == PartHead || part == PartLegFL {
+			return shade(col(230, 180, 100)) // bill and feet
+		}
+		return shade(col(110, 75, 50))
+	case SkinCroc:
+		scale := col(80, 100, 60)
+		if (x/2+y/2)%2 == 0 {
+			scale = col(70, 88, 52)
+		}
+		if face == 1 {
+			scale = col(170, 165, 120)
+		}
+		if part == PartHead {
+			if face == 4 {
+				if y >= 9 && (x%2 == 0) {
+					return rl.NewColor(240, 240, 230, 255) // teeth
+				}
+				return eyes(scale, col(220, 200, 60), false)
+			}
+			if (face == 2 || face == 3) && y >= 9 && x%3 == 0 {
+				return rl.NewColor(240, 240, 230, 255)
+			}
+		}
+		return shade(scale)
 	case SkinSheep:
 		wool := col(232, 232, 226)
 		if part == PartHead {

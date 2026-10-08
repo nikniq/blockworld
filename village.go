@@ -29,7 +29,7 @@ func (w *World) placeVillages(heights []int) {
 				h := heights[wrapZ(cz+dz)*worldW+wrapX(cx+dx)]
 				lo, hi = min(lo, h), max(hi, h)
 				samples++
-				if b := w.getLocal(cx+dx, h-1, cz+dz); b == Grass || b == Dirt || b == Log || b == Leaves {
+				if b := w.getLocal(cx+dx, h-1, cz+dz); b == Grass || b == Dirt || b == Log || b == Leaves || b == RedSand || b == EucLog || b == EucLeaves {
 					grass++
 				}
 			}
@@ -93,7 +93,9 @@ func (w *World) flattenColumn(x, z, base int) {
 			w.setLocal(x, y, z, Dirt)
 		}
 	}
-	w.setLocal(x, base-1, z, Grass)
+	if w.getLocal(x, base-1, z) != RedSand {
+		w.setLocal(x, base-1, z, Grass)
+	}
 	for y := base; y < base+7; y++ {
 		w.setLocal(x, y, z, Air)
 	}

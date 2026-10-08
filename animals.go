@@ -19,6 +19,12 @@ const (
 	AnimalTrader
 	AnimalVillager
 	AnimalWolf
+	AnimalKangaroo
+	AnimalEmu
+	AnimalKoala
+	AnimalWombat
+	AnimalPlatypus
+	AnimalCrocodile
 	numAnimalKinds
 )
 
@@ -36,13 +42,19 @@ type animalSpec struct {
 }
 
 var animalKinds = [...]animalSpec{
-	AnimalPig:      {"Pig", 4, 1.6, 0.35, 0.9, rl.NewColor(235, 160, 170, 255), rl.NewColor(240, 170, 180, 255), rl.NewColor(220, 140, 150, 255), 2, 0},
-	AnimalCow:      {"Cow", 6, 1.4, 0.4, 1.3, rl.NewColor(80, 55, 40, 255), rl.NewColor(90, 65, 50, 255), rl.NewColor(60, 40, 30, 255), 3, 0},
-	AnimalSheep:    {"Sheep", 4, 1.5, 0.4, 1.1, rl.NewColor(230, 230, 225, 255), rl.NewColor(70, 60, 55, 255), rl.NewColor(60, 55, 50, 255), 1, 0},
-	AnimalDino:     {"Dinosaur", 45, 2.2, 0.7, 2.8, rl.NewColor(70, 120, 60, 255), rl.NewColor(80, 130, 65, 255), rl.NewColor(60, 100, 50, 255), 8, 18},
-	AnimalTrader:   {"Wandering Trader", 20, 1.2, 0.3, 1.8, rl.NewColor(90, 60, 130, 255), rl.NewColor(205, 160, 120, 255), rl.NewColor(60, 40, 90, 255), 0, 0},
-	AnimalVillager: {"Villager", 20, 1.3, 0.3, 1.8, rl.NewColor(150, 110, 70, 255), rl.NewColor(205, 160, 120, 255), rl.NewColor(80, 60, 40, 255), 0, 0},
-	AnimalWolf:     {"Wolf", 16, 2.6, 0.35, 0.85, rl.NewColor(200, 200, 200, 255), rl.NewColor(210, 210, 210, 255), rl.NewColor(170, 170, 170, 255), 0, 6},
+	AnimalPig:       {"Pig", 4, 1.6, 0.35, 0.9, rl.NewColor(235, 160, 170, 255), rl.NewColor(240, 170, 180, 255), rl.NewColor(220, 140, 150, 255), 2, 0},
+	AnimalCow:       {"Cow", 6, 1.4, 0.4, 1.3, rl.NewColor(80, 55, 40, 255), rl.NewColor(90, 65, 50, 255), rl.NewColor(60, 40, 30, 255), 3, 0},
+	AnimalSheep:     {"Sheep", 4, 1.5, 0.4, 1.1, rl.NewColor(230, 230, 225, 255), rl.NewColor(70, 60, 55, 255), rl.NewColor(60, 55, 50, 255), 1, 0},
+	AnimalDino:      {"Dinosaur", 45, 2.2, 0.7, 2.8, rl.NewColor(70, 120, 60, 255), rl.NewColor(80, 130, 65, 255), rl.NewColor(60, 100, 50, 255), 8, 18},
+	AnimalTrader:    {"Wandering Trader", 20, 1.2, 0.3, 1.8, rl.NewColor(90, 60, 130, 255), rl.NewColor(205, 160, 120, 255), rl.NewColor(60, 40, 90, 255), 0, 0},
+	AnimalVillager:  {"Villager", 20, 1.3, 0.3, 1.8, rl.NewColor(150, 110, 70, 255), rl.NewColor(205, 160, 120, 255), rl.NewColor(80, 60, 40, 255), 0, 0},
+	AnimalWolf:      {"Wolf", 16, 2.6, 0.35, 0.85, rl.NewColor(200, 200, 200, 255), rl.NewColor(210, 210, 210, 255), rl.NewColor(170, 170, 170, 255), 0, 6},
+	AnimalKangaroo:  {"Kangaroo", 14, 3.4, 0.4, 1.9, rl.NewColor(170, 120, 80, 255), rl.NewColor(175, 125, 85, 255), rl.NewColor(150, 105, 70, 255), 3, 8},
+	AnimalEmu:       {"Emu", 10, 3.8, 0.35, 2.3, rl.NewColor(90, 80, 70, 255), rl.NewColor(100, 110, 140, 255), rl.NewColor(110, 100, 90, 255), 2, 0},
+	AnimalKoala:     {"Koala", 6, 0.8, 0.3, 0.75, rl.NewColor(140, 140, 145, 255), rl.NewColor(150, 150, 155, 255), rl.NewColor(120, 120, 125, 255), 0, 0},
+	AnimalWombat:    {"Wombat", 12, 1.3, 0.4, 0.7, rl.NewColor(110, 85, 65, 255), rl.NewColor(115, 90, 70, 255), rl.NewColor(90, 70, 55, 255), 0, 0},
+	AnimalPlatypus:  {"Platypus", 5, 1.6, 0.25, 0.3, rl.NewColor(110, 75, 50, 255), rl.NewColor(230, 180, 100, 255), rl.NewColor(100, 70, 45, 255), 0, 0},
+	AnimalCrocodile: {"Crocodile", 30, 1.5, 0.5, 0.5, rl.NewColor(80, 100, 60, 255), rl.NewColor(90, 110, 65, 255), rl.NewColor(70, 90, 55, 255), 2, 12},
 }
 
 type Animal struct {
@@ -191,6 +203,44 @@ func (a *Animal) Draw(w *World) {
 		kind, scale = SkinSheep, 0.95
 	case AnimalWolf:
 		kind, scale = SkinWolf, 0.8
+	case AnimalKoala:
+		kind, scale = SkinKoala, 0.55
+	case AnimalWombat:
+		kind, scale = SkinWombat, 0.8
+	case AnimalKangaroo, AnimalEmu, AnimalCrocodile, AnimalPlatypus:
+		pose := Pose{Pos: a.Pos, Yaw: yawOf(a.Heading), Phase: a.Phase, Amp: 0, Scale: 1, Lum: a.Lum, Alpha: 1}
+		if a.Walking || a.Flee > 0 {
+			pose.Amp = 1
+		}
+		if !a.Alive {
+			pose.Death = clamp(a.DeathT*2.5, 0, 1)
+			pose.Alpha = 1 - pose.Death
+			pose.Amp = 0
+			if pose.Death >= 1 {
+				return
+			}
+		}
+		if a.Flee > 4.7 || (a.Spec.Damage > 0 && a.Flee > 13.7) {
+			pose.Flash = 0.6
+		}
+		switch a.Kind {
+		case AnimalKangaroo:
+			skins.DrawKangaroo(w, &pose)
+		case AnimalEmu:
+			skins.DrawEmu(w, &pose)
+		case AnimalCrocodile:
+			pose.Swing = clamp(a.BiteCD-0.9, 0, 0.4) / 0.4
+			skins.DrawCroc(w, &pose)
+		default:
+			skins.DrawPlatypus(w, &pose)
+		}
+		if a.Alive && a.HP < a.Spec.HP {
+			top := a.Pos.Y + a.Spec.Height + 0.2
+			frac := float32(a.HP) / float32(a.Spec.HP)
+			rl.DrawCubeV(rl.NewVector3(a.Pos.X, top, a.Pos.Z), rl.NewVector3(1.0, 0.08, 0.08), rl.NewColor(0, 0, 0, 180))
+			rl.DrawCubeV(rl.NewVector3(a.Pos.X-(1-frac)*0.5, top, a.Pos.Z), rl.NewVector3(frac, 0.1, 0.1), rl.Lime)
+		}
+		return
 	case AnimalVillager:
 		pose := Pose{Pos: a.Pos, Yaw: yawOf(a.Heading), Phase: a.Phase, Amp: 0, Scale: 0.9, Lum: a.Lum, Alpha: 1}
 		if a.Walking || a.Flee > 0 {
@@ -453,6 +503,9 @@ func (g *Game) updateAnimals(dt float32) {
 		if a.Alive && a.Kind == AnimalWolf {
 			g.wolfTick(a, dt)
 		}
+		if a.Alive && a.Kind >= AnimalKangaroo {
+			g.wildlifeTick(a, dt)
+		}
 		t := g.nearestTarget(a.Pos)
 		if bite := a.Update(dt, g.World, t); bite > 0 {
 			g.hurtTargetFrom(t.ID, int(float32(bite)*damageScale()+0.5), "was eaten by a Dinosaur", true, a.Pos, 7)
@@ -496,6 +549,16 @@ func (g *Game) updateAnimals(dt float32) {
 		if herd < 10 && !g.Sky.IsNight() {
 			g.spawnAnimals(2)
 		}
+		wild := 0
+		for _, a := range g.Animals {
+			if a.Alive && a.Kind >= AnimalKangaroo {
+				wild++
+			}
+		}
+		if wild < 12 && rand.Float32() < 0.4 {
+			g.spawnWildlife(2)
+			g.spawnWaterLife(1)
+		}
 		wolves := 0
 		for _, a := range g.Animals {
 			if a.Alive && a.Kind == AnimalWolf && !a.Tamed {
@@ -533,6 +596,19 @@ func (g *Game) killAnimal(a *Animal) {
 		g.spawnDrop(c, Meat, 0)
 	}
 	switch a.Kind {
+	case AnimalKoala, AnimalPlatypus:
+		g.Score -= 110 // undo the kill bonus and fine the player
+		g.say("Protected species!  -100", 2)
+	case AnimalKangaroo:
+		g.spawnDrop(c, Leather, 0)
+	case AnimalWombat:
+		g.spawnDrop(c, Leather, 0)
+		g.spawnDrop(c, Leather, 0)
+	case AnimalCrocodile:
+		g.Score += 150
+		for i := 0; i < 3; i++ {
+			g.spawnDrop(c, Leather, 0)
+		}
 	case AnimalWolf:
 		if a.Tamed {
 			g.say("Your wolf has fallen", 2.5)

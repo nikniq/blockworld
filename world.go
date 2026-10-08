@@ -71,6 +71,10 @@ const (
 	BeaconLit
 	Fish
 	Rod
+	RedSand
+	EucLog
+	EucLeaves
+	DeadBush
 	Spawner
 	Crate
 	Bedrock
@@ -126,6 +130,7 @@ const (
 	BiomeForest
 	BiomeDesert
 	BiomeTaiga
+	BiomeOutback
 )
 
 // TinyBox returns the extents of a Tiny block.
@@ -234,6 +239,14 @@ var blocks = [numBlocks]blockInfo{
 		Pat: [3]texPattern{PatFish, PatFish, PatFish}, MineTime: 0.1, Drops: Fish, Food: 5},
 	Rod: {Name: "Fishing Rod", Top: col(130, 90, 50), Side: col(130, 90, 50), Bottom: col(130, 90, 50),
 		Pat: [3]texPattern{PatRod, PatRod, PatRod}, MineTime: 0.1, Drops: Rod, Item: true},
+	RedSand: {Name: "Red Sand", Top: col(190, 95, 50), Side: col(182, 90, 48), Bottom: col(170, 85, 45),
+		Pat: [3]texPattern{PatSand, PatSand, PatSand}, MineTime: 0.5, Drops: RedSand, Solid: true},
+	EucLog: {Name: "Eucalyptus Log", Top: col(200, 180, 150), Side: col(215, 205, 190), Bottom: col(200, 180, 150),
+		Pat: [3]texPattern{PatLogTop, PatBirchSide, PatLogTop}, MineTime: 1.5, Drops: EucLog, Solid: true},
+	EucLeaves: {Name: "Eucalyptus Leaves", Top: col(120, 150, 110), Side: col(110, 140, 100), Bottom: col(95, 125, 90),
+		Pat: [3]texPattern{PatLeaves, PatLeaves, PatLeaves}, MineTime: 0.3, Drops: EucLeaves, Solid: true},
+	DeadBush: {Name: "Dead Bush", Top: col(150, 110, 60), Side: col(150, 110, 60), Bottom: col(150, 110, 60),
+		Pat: [3]texPattern{PatTuft, PatTuft, PatTuft}, MineTime: 0.05, Tiny: true, Box: &plantBox, Cross: true},
 	Spawner: {Name: "Monster Spawner", Top: col(40, 44, 50), Side: col(40, 44, 50), Bottom: col(40, 44, 50),
 		Pat: [3]texPattern{PatSpawner, PatSpawner, PatSpawner}, MineTime: 6, Hard: true, Drops: Air, Solid: true},
 	Crate: {Name: "Loot Crate", Top: col(170, 130, 70), Side: col(160, 120, 65), Bottom: col(150, 110, 60),
@@ -250,7 +263,7 @@ func (b Block) lightCost() uint8 {
 	switch {
 	case b == Air || blocks[b].Tiny || b == Glass || b == Lava:
 		return 1
-	case b == Water || b == Leaves || b == SpruceLeaves:
+	case b == Water || b == Leaves || b == SpruceLeaves || b == EucLeaves:
 		return 2
 	}
 	return 0
@@ -609,9 +622,11 @@ func vnoise3p(x, y, z float32, seed, px, pz int) float32 {
 func biomeAt(x, z int, seed int) Biome {
 	b := pnoise(float32(x)/48, float32(z)/48, seed+20, worldW/48, worldD/48)
 	switch {
-	case b < 0.3:
+	case b < 0.22:
 		return BiomeDesert
-	case b < 0.5:
+	case b < 0.36:
+		return BiomeOutback
+	case b < 0.52:
 		return BiomePlains
 	case b < 0.74:
 		return BiomeForest
@@ -644,6 +659,7 @@ func (w *World) generate(seed int) {
 			biome := biomeAt(x, z, seed)
 			biomes[z*worldW+x] = biome
 			sandy := h <= seaLevel+2 || biome == BiomeDesert
+			outback := biome == BiomeOutback && h > seaLevel+2
 			for y := 0; y < h; y++ {
 				b := Stone
 				switch {
@@ -653,6 +669,8 @@ func (w *World) generate(seed int) {
 					b = Grass
 					if sandy {
 						b = Sand
+					} else if outback {
+						b = RedSand
 					} else if h >= 40 || (biome == BiomeTaiga && h >= 20) {
 						b = Snow
 					}
@@ -660,6 +678,8 @@ func (w *World) generate(seed int) {
 					b = Dirt
 					if sandy {
 						b = Sand
+					} else if outback && y >= h-3 {
+						b = RedSand
 					}
 				default:
 					if vnoise3p(fx/8, float32(y)/7, fz/8, seed+5, worldW/8, worldD/8) > 0.8 {
@@ -762,6 +782,13 @@ func (w *World) generate(seed int) {
 		case BiomeTaiga:
 			if (top == Grass || top == Snow) && r < 0.3 {
 				w.placeSpruce(x, h, z, w.setLocal)
+			}
+		case BiomeOutback:
+			switch {
+			case top == RedSand && r < 0.035:
+				w.placeEucalyptus(x, h, z, w.setLocal)
+			case top == RedSand && r < 0.14:
+				w.setLocal(x, h, z, DeadBush)
 			}
 		}
 	}
@@ -931,6 +958,30 @@ func (w *World) placeBirch(x, y, z int, set func(x, y, z int, b Block)) {
 				}
 				if b := w.getLocal(x+dx, top+dy, z+dz); b == Air || b == TallGrass {
 					set(x+dx, top+dy, z+dz, Leaves)
+				}
+			}
+		}
+	}
+}
+
+// placeEucalyptus writes a tall pale trunk with a sparse, high canopy.
+func (w *World) placeEucalyptus(x, y, z int, set func(x, y, z int, b Block)) {
+	th := 7 + rand.Intn(4)
+	for yy := y; yy < y+th; yy++ {
+		set(x, yy, z, EucLog)
+	}
+	top := y + th - 1
+	for i := 0; i < 3; i++ {
+		cx, cz, cy := x+rand.Intn(3)-1, z+rand.Intn(3)-1, top-rand.Intn(3)
+		for dy := -1; dy <= 1; dy++ {
+			for dz := -1; dz <= 1; dz++ {
+				for dx := -1; dx <= 1; dx++ {
+					if abs(dx)+abs(dz)+abs(dy) > 2 {
+						continue
+					}
+					if w.getLocal(cx+dx, cy+dy, cz+dz) == Air {
+						set(cx+dx, cy+dy, cz+dz, EucLeaves)
+					}
 				}
 			}
 		}
@@ -1257,7 +1308,7 @@ func (m *meshBuf) emitFaceUV(f *faceDef, u0, v0, u1, v1, x, y, z float32, box [2
 // biomeTintCode returns the vertex-alpha code the shader turns into a biome
 // colour for foliage faces, or 255 for faces that keep their texture colour.
 func biomeTintCode(b Block, f *faceDef, biome Biome) uint8 {
-	foliage := b == Leaves || b == SpruceLeaves || b == TallGrass || b == Sapling || (b == Grass && f.n[1] > 0)
+	foliage := b == Leaves || b == SpruceLeaves || b == EucLeaves || b == TallGrass || b == Sapling || (b == Grass && f.n[1] > 0)
 	if !foliage {
 		return 255
 	}
@@ -1370,7 +1421,7 @@ func (w *World) buildChunk(ci, cj int, c *chunk) {
 					f := &faces[fi]
 					nx, ny, nz := lx+f.n[0], y+f.n[1], lz+f.n[2]
 					nb := w.getLocal(nx, ny, nz)
-					leafy := b == Leaves || b == SpruceLeaves
+					leafy := b == Leaves || b == SpruceLeaves || b == EucLeaves
 					if (nb.Opaque() && !(leafy && nb == b)) || (trans && nb == b) {
 						continue
 					}
@@ -1495,7 +1546,8 @@ void main() {
         if (code > 249.5) biome = vec3(0.92, 1.0, 0.78);        // plains
         else if (code > 248.5) biome = vec3(0.72, 1.0, 0.66);   // forest
         else if (code > 247.5) biome = vec3(1.0, 0.92, 0.55);   // desert
-        else biome = vec3(0.66, 0.96, 0.88);                    // taiga
+        else if (code > 246.5) biome = vec3(0.66, 0.96, 0.88);  // taiga
+        else biome = vec3(0.95, 0.85, 0.55);                    // outback
         t.rgb *= biome;
     } else {
         va = fragColor.a;
@@ -1917,7 +1969,7 @@ func (w *World) RandomFreePoint(from rl.Vector3, minDist float32) rl.Vector3 {
 		if h != w.Height[lz*worldW+lx] || h <= seaLevel {
 			continue // under water or under a canopy
 		}
-		if g := w.getLocal(lx, h-1, lz); g == Leaves || g == SpruceLeaves || g == Log || g == BirchLog {
+		if g := w.getLocal(lx, h-1, lz); g == Leaves || g == SpruceLeaves || g == EucLeaves || g == Log || g == BirchLog || g == EucLog {
 			continue // on top of a tree
 		}
 		p := rl.NewVector3(float32(lx+originX)+0.5, float32(h), float32(lz+originZ)+0.5)

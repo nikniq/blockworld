@@ -11,7 +11,11 @@ block textures and sound effects are generated at startup.
 - A 192x192x64 block world is generated every run: hills, a mountain band, beaches, a sea,
   winding caves and ore veins (coal, iron, gold, diamond), plus stone-brick ruins for cover.
 - **Biomes**: plains with tall grass and flowers, oak and birch forests, deserts with cacti (they sting),
-  and snowy taiga with tall spruces.
+  snowy taiga with tall spruces, and red-sand outback with pale eucalyptus and dead bushes.
+- **Australian wildlife**: kangaroos hop across the outback and kick when provoked, emus sprint off,
+  wombats trundle about, koalas doze up in the trees, platypuses paddle in rivers and lakes, and
+  crocodiles lie on warm shores and charge anyone who wanders close. A kookaburra laughs at dawn.
+  Koalas and platypuses are protected: harming one costs 100 points.
 - **Day/night cycle** (six minutes). Mine, craft and build by day. At nightfall zombies, spiders,
   creepers, skeleton archers and zombie brutes rise in the dark; more arrive through the night.
   Hostiles only rise where there is no torchlight, so a well-lit base is a safe base. Undead burn at sunrise.

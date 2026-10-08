@@ -874,3 +874,48 @@ func TestBeaconAndWolves(t *testing.T) {
 		t.Fatalf("tamed wolf should attack the zombie: %d -> %d", hp, e.HP)
 	}
 }
+
+// The outback generates with red sand, eucalyptus and its animals; protected species cost points.
+func TestOutbackWildlife(t *testing.T) {
+	rand.Seed(19)
+	g := &Game{Audio: &Audio{}, CraftHover: -1}
+	g.Reset()
+	w := g.World
+	red, euc := 0, 0
+	for _, b := range w.Blocks {
+		switch b {
+		case RedSand:
+			red++
+		case EucLog:
+			euc++
+		}
+	}
+	if red == 0 || euc == 0 {
+		t.Fatalf("outback should have red sand (%d) and eucalyptus (%d)", red, euc)
+	}
+	kinds := map[AnimalKind]int{}
+	for _, a := range g.Animals {
+		kinds[a.Kind]++
+	}
+	if kinds[AnimalKangaroo]+kinds[AnimalEmu]+kinds[AnimalWombat] == 0 {
+		t.Fatalf("outback animals should spawn: %v", kinds)
+	}
+	if kinds[AnimalPlatypus]+kinds[AnimalCrocodile] == 0 {
+		t.Fatalf("water life should spawn: %v", kinds)
+	}
+	// A kangaroo hops when it walks.
+	k := NewAnimal(rl.NewVector3(g.Spawn.X+2, g.Spawn.Y, g.Spawn.Z), AnimalKangaroo)
+	k.Walking = true
+	g.Animals = append(g.Animals, k)
+	g.wildlifeTick(k, 0.1)
+	if k.VelY <= 0 {
+		t.Fatal("walking kangaroo should hop")
+	}
+	// Killing a koala is penalised.
+	ko := NewAnimal(g.Spawn, AnimalKoala)
+	score := g.Score
+	g.killAnimal(ko)
+	if g.Score != score-100 {
+		t.Fatal("koalas are protected")
+	}
+}
