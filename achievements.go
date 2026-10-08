@@ -30,6 +30,9 @@ const (
 	AchSwim
 	AchTrade
 	AchQuest
+	AchBeacon
+	AchWolf
+	AchFish
 	numAch
 )
 
@@ -55,6 +58,9 @@ var achievements = [numAch]achievement{
 	AchSwim:        {"Deep End", "Go for a swim"},
 	AchTrade:       {"Haggler", "Trade with the wandering trader"},
 	AchQuest:       {"Good Neighbour", "Complete a villager's quest"},
+	AchBeacon:      {"Conqueror", "Light the ancient beacon"},
+	AchWolf:        {"Best Friend", "Tame a wolf"},
+	AchFish:        {"Gone Fishing", "Catch a fish"},
 }
 
 type Toast struct {

@@ -30,6 +30,7 @@ const (
 	SkinFarmer
 	SkinGuard
 	SkinLibrarian
+	SkinWolf
 	numSkins
 )
 
@@ -302,6 +303,23 @@ func paintSkin(kind SkinKind, part, face, x, y int) rl.Color {
 			return shade(mul(green, 0.85)) // tail
 		}
 		return shade(green)
+	case SkinWolf:
+		fur := col(205, 205, 205)
+		if hash2(x/2, y/2, 83+part) < 0.25 {
+			fur = col(170, 170, 175)
+		}
+		if part == PartHead {
+			if face == 4 {
+				if y >= 10 && x >= 6 && x <= 9 {
+					return col(40, 40, 40) // nose
+				}
+				return eyes(fur, col(30, 30, 30), true)
+			}
+			if face == 0 && (x <= 3 || x >= 12) && y <= 5 {
+				return shade(col(120, 120, 125)) // ears
+			}
+		}
+		return shade(fur)
 	case SkinSheep:
 		wool := col(232, 232, 226)
 		if part == PartHead {

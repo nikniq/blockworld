@@ -31,6 +31,7 @@ var recipes = []Recipe{
 	{Name: "Bread", Out: Bread, Count: 1, In: []Ingredient{{WheatItem, 3}}},
 	{Name: "Bow", Out: Bow, Count: 1, In: []Ingredient{{Planks, 3}, {Wool, 2}}},
 	{Name: "Door", Out: DoorClosed, Count: 1, In: []Ingredient{{Planks, 4}}},
+	{Name: "Fishing Rod", Out: Rod, Count: 1, In: []Ingredient{{Planks, 3}, {Wool, 2}}},
 	{Name: "Arrows x4", Out: ArrowItem, Count: 4, In: []Ingredient{{Planks, 1}, {Gravel, 1}}},
 	{Name: "TNT", Out: TNT, Count: 1, In: []Ingredient{{Sand, 4}, {CoalOre, 4}}},
 	{Name: "Ladder x4", Out: Ladder, Count: 4, In: []Ingredient{{Planks, 2}}},

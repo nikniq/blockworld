@@ -67,6 +67,10 @@ const (
 	ArrowItem
 	DoorClosed
 	DoorOpen
+	Beacon
+	BeaconLit
+	Fish
+	Rod
 	Spawner
 	Crate
 	Bedrock
@@ -222,6 +226,14 @@ var blocks = [numBlocks]blockInfo{
 		Pat: [3]texPattern{PatPlanks, PatDoor, PatPlanks}, MineTime: 1.0, Drops: DoorClosed, Solid: true, Tiny: true, Box: &doorClosedBox},
 	DoorOpen: {Name: "Door (open)", Top: col(150, 110, 65), Side: col(150, 110, 65), Bottom: col(150, 110, 65),
 		Pat: [3]texPattern{PatPlanks, PatDoor, PatPlanks}, MineTime: 1.0, Drops: DoorClosed, Tiny: true, Box: &doorOpenBox},
+	Beacon: {Name: "Ancient Beacon", Top: col(90, 200, 220), Side: col(70, 150, 170), Bottom: col(60, 120, 140),
+		Pat: [3]texPattern{PatBeacon, PatBeacon, PatBeacon}, MineTime: -1, Solid: true, Emit: 9},
+	BeaconLit: {Name: "Lit Beacon", Top: col(190, 240, 255), Side: col(150, 220, 240), Bottom: col(120, 190, 210),
+		Pat: [3]texPattern{PatBeacon, PatBeacon, PatBeacon}, MineTime: -1, Solid: true, Emit: 15},
+	Fish: {Name: "Fish", Top: col(120, 160, 190), Side: col(120, 160, 190), Bottom: col(120, 160, 190),
+		Pat: [3]texPattern{PatFish, PatFish, PatFish}, MineTime: 0.1, Drops: Fish, Food: 5},
+	Rod: {Name: "Fishing Rod", Top: col(130, 90, 50), Side: col(130, 90, 50), Bottom: col(130, 90, 50),
+		Pat: [3]texPattern{PatRod, PatRod, PatRod}, MineTime: 0.1, Drops: Rod, Item: true},
 	Spawner: {Name: "Monster Spawner", Top: col(40, 44, 50), Side: col(40, 44, 50), Bottom: col(40, 44, 50),
 		Pat: [3]texPattern{PatSpawner, PatSpawner, PatSpawner}, MineTime: 6, Hard: true, Drops: Air, Solid: true},
 	Crate: {Name: "Loot Crate", Top: col(170, 130, 70), Side: col(160, 120, 65), Bottom: col(150, 110, 60),
@@ -282,18 +294,20 @@ type Env struct {
 
 // World holds the voxel volume, per-column heights and chunk meshes.
 type World struct {
-	Blocks  []Block
-	Height  []int                      // per column (z*worldW+x): top of the column (highest non-air, including water) + 1
-	Ground  []int                      // per column: feet level on the highest solid block
-	Light   []uint8                    // per cell: sunlight in the high nibble, block light in the low nibble
-	Version int                        // bumped on every block change; the nav grid watches it
-	Seed    int                        // generation seed; biomes are derived from it
-	Biome   []Biome                    // per column
-	OnSet   func(x, y, z int, b Block) // called after every Set (multiplayer broadcast)
-	relight map[int]bool               // chunks whose lighting must be recomputed
-	chunks  []*chunk
-	ncx     int
-	ncz     int
+	Blocks    []Block
+	Height    []int      // per column (z*worldW+x): top of the column (highest non-air, including water) + 1
+	Ground    []int      // per column: feet level on the highest solid block
+	Light     []uint8    // per cell: sunlight in the high nibble, block light in the low nibble
+	Version   int        // bumped on every block change; the nav grid watches it
+	Seed      int        // generation seed; biomes are derived from it
+	Beacon    rl.Vector3 // the objective's position
+	BeaconLit bool
+	Biome     []Biome                    // per column
+	OnSet     func(x, y, z int, b Block) // called after every Set (multiplayer broadcast)
+	relight   map[int]bool               // chunks whose lighting must be recomputed
+	chunks    []*chunk
+	ncx       int
+	ncz       int
 
 	gpu      bool // GPU resources created
 	tex      rl.Texture2D
@@ -334,6 +348,7 @@ func NewWorldFromBlocks(blocks []Block, seed int) *World {
 	copy(w.Blocks, blocks)
 	w.Seed = seed
 	w.finish()
+	w.findBeacon()
 	return w
 }
 
@@ -784,8 +799,9 @@ func (w *World) generate(seed int) {
 		w.setLocal(x+3, y, z, Air)
 		w.setLocal(x+3, y+1, z, Air)
 	}
-	// Villages on flat grassland.
+	// Villages on flat grassland, and the beacon tower far from spawn.
 	w.placeVillages(heights)
+	w.placeBeaconTower(heights)
 	// Abandoned mineshafts: long timbered corridors with a few crates.
 	for i := 0; i < 4*areaScale; i++ {
 		x, z := rand.Intn(worldW-40)+20, rand.Intn(worldD-40)+20

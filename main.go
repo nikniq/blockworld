@@ -7,7 +7,6 @@ package main
 import (
 	_ "embed"
 	"flag"
-	"runtime/pprof"
 	"fmt"
 	"image"
 	"image/color"
@@ -15,6 +14,7 @@ import (
 	"math/rand"
 	"os"
 	"runtime"
+	"runtime/pprof"
 	"strings"
 	"time"
 
@@ -100,6 +100,7 @@ type Game struct {
 	JoinField      int // 0 address, 1 name
 	Disc           *Discovery
 	Talking        *Animal
+	Won            bool
 	LightningT     float32 // flash remaining
 	ThunderT       float32 // countdown to the thunder clap
 	StormCD        float32
@@ -184,7 +185,9 @@ func (g *Game) Reset() {
 	g.spawnAnimals(16)
 	g.spawnDinosaur()
 	g.spawnVillagers()
-	g.say("Day 1  -  mine, craft and build before dark  (E = crafting)", 5)
+	g.spawnWolves(4)
+	g.Won = false
+	g.say("Day 1  -  mine, craft and build before dark. Find and light the ancient beacon.", 5)
 }
 
 func (g *Game) say(s string, t float32) { g.Msg, g.MsgT = s, t }
@@ -770,6 +773,14 @@ func (g *Game) updateBuilder(dt float32) {
 	} else {
 		p.Mining = false
 	}
+	if usePressed() && w.Get(a.X, a.Y, a.Z) == Beacon {
+		if g.isClient() {
+			g.say("Only the host can light the beacon", 2)
+		} else {
+			g.lightBeacon(a.X, a.Y, a.Z)
+		}
+		return
+	}
 	if usePressed() {
 		if b := w.Get(a.X, a.Y, a.Z); b == DoorClosed || b == DoorOpen {
 			nb := DoorOpen
@@ -1313,7 +1324,7 @@ func (g *Game) update(dt float32) {
 	if usePressed() && g.State == StatePlaying {
 		ray := rl.NewRay(p.Eye(), p.Forward())
 		for _, an := range g.Animals {
-			if !an.Alive || (an.Kind != AnimalTrader && an.Kind != AnimalVillager) {
+			if !an.Alive || (an.Kind != AnimalTrader && an.Kind != AnimalVillager && an.Kind != AnimalWolf) {
 				continue
 			}
 			bb := an.BB()
@@ -1321,6 +1332,10 @@ func (g *Game) update(dt float32) {
 			d := rl.Vector3Subtract(n, an.Pos)
 			bb = rl.NewBoundingBox(rl.Vector3Add(bb.Min, d), rl.Vector3Add(bb.Max, d))
 			if c := rl.GetRayCollisionBox(ray, bb); c.Hit && c.Distance < 4 {
+				if an.Kind == AnimalWolf {
+					g.tameWolf(an)
+					return
+				}
 				if an.Kind == AnimalTrader {
 					g.State = StateTrade
 					g.CraftHover = -1
@@ -1349,6 +1364,10 @@ func (g *Game) update(dt float32) {
 		if p.TryAttack() {
 			g.attack()
 		}
+	case ItemRod:
+		p.Mining = false
+		p.Aim.Hit = false
+		g.updateFishing(dt)
 	case ItemBow:
 		p.Mining = false
 		p.Aim.Hit = false
@@ -1667,6 +1686,7 @@ func (g *Game) draw3D() {
 		rl.DrawLine3D(tr.Start, tr.End, rl.NewColor(255, 240, 160, 255))
 	}
 	g.drawBolt()
+	g.drawBobber()
 	for _, s := range g.Sparks {
 		if s.Block != Air {
 			m := rl.MatrixMultiply(rl.MatrixMultiply(rl.MatrixScale(0.12, 0.12, 0.12), rl.MatrixRotateY(s.Spin)), rl.MatrixTranslate(s.Pos.X, s.Pos.Y, s.Pos.Z))
@@ -1801,6 +1821,93 @@ func (g *Game) drawShadows() {
 	}
 }
 
+// updateFishing casts into water, waits for a bite, and reels in on a click in time.
+func (g *Game) updateFishing(dt float32) {
+	p := g.Player
+	if !p.Fishing {
+		if attackPressed() {
+			// Cast at the water under the crosshair.
+			o, d := p.Eye(), p.Forward()
+			for t := float32(0.5); t < 12; t += 0.25 {
+				q := rl.Vector3Add(o, rl.Vector3Scale(d, t))
+				if g.World.WaterAt(q) {
+					q.Y = float32(floorI(q.Y)) + 0.85
+					p.Fishing, p.Bobber = true, q
+					p.BiteT = 3 + rand.Float32()*6
+					p.BiteOpen = 0
+					p.Swing = 1
+					g.Audio.Play(g.Audio.Splash, 0.4)
+					return
+				}
+				if g.World.Solid(floorI(q.X), floorI(q.Y), floorI(q.Z)) {
+					break
+				}
+			}
+			g.say("Aim at water to cast", 1.2)
+		}
+		return
+	}
+	if WrapDist(p.Bobber, p.Pos) > 16 {
+		p.Fishing = false
+		return
+	}
+	if p.BiteOpen > 0 {
+		p.BiteOpen -= dt
+		if attackPressed() {
+			p.Fishing = false
+			p.Swing = 1
+			roll := rand.Float32()
+			switch {
+			case roll < 0.75:
+				p.Inv[Fish]++
+				g.say("You caught a fish!", 1.5)
+				g.unlock(AchFish)
+			case roll < 0.9:
+				p.Inv[Seeds] += 2
+				g.say("A clump of weeds... with seeds in it", 1.5)
+			default:
+				p.Inv[Leather]++
+				g.say("An old boot. Well, it is leather.", 1.5)
+			}
+			g.Audio.Play(g.Audio.Pickup, 0.7)
+			p.EnsureHeld()
+			return
+		}
+		if p.BiteOpen <= 0 {
+			g.say("It got away. Cast again.", 1.2)
+			p.Fishing = false
+		}
+		return
+	}
+	p.BiteT -= dt
+	if p.BiteT <= 0 {
+		p.BiteOpen = 1.3
+		g.burst(p.Bobber, rl.NewColor(120, 170, 230, 255), 10)
+		g.Audio.Play(g.Audio.Splash, 0.8)
+	}
+	if attackPressed() {
+		p.Fishing = false // reel in early
+	}
+}
+
+// drawBobber draws the fishing line and float.
+func (g *Game) drawBobber() {
+	p := g.Player
+	if !p.Fishing || p.Held.Kind != ItemRod {
+		return
+	}
+	b := Near(p.Bobber, p.Pos)
+	dip := float32(0)
+	if p.BiteOpen > 0 {
+		dip = 0.25 + float32(math.Sin(float64(p.BiteOpen*30)))*0.1
+	}
+	bob := rl.NewVector3(b.X, b.Y-dip+float32(math.Sin(float64(rl.GetTime()*2)))*0.03, b.Z)
+	tip := rl.Vector3Add(p.Eye(), rl.Vector3Add(rl.Vector3Scale(p.Forward(), 1.2), rl.Vector3Scale(p.Right(), 0.5)))
+	rl.DrawLine3D(tip, bob, rl.NewColor(230, 230, 220, 255))
+	rl.DrawCube(bob, 0.18, 0.18, 0.18, rl.NewColor(220, 50, 50, 255))
+	rl.DrawCube(rl.NewVector3(bob.X, bob.Y+0.1, bob.Z), 0.18, 0.06, 0.18, rl.White)
+}
+
 // updateStorm strikes lightning now and then while it rains: a flash, a bolt, then thunder.
 func (g *Game) updateStorm(dt float32) {
 	g.LightningT = max(0, g.LightningT-dt)
@@ -1919,6 +2026,16 @@ func (g *Game) drawWeapon() {
 		rl.DrawRectangle(int32(rx+60), int32(ry+70), 90, 220, skin)
 		rl.DrawRectangle(int32(rx+60), int32(ry+70), 90, 220, rl.Fade(rl.Black, 0.15))
 		return
+	case ItemRod:
+		rx := sw*0.72 + bobX
+		ry := sh - 40 + bobY
+		rot := float32(-50) + swing*30
+		rl.DrawRectanglePro(rl.NewRectangle(rx+30, ry+60, 80, 200), rl.NewVector2(40, 0), rot*0.3, skin)
+		rl.DrawRectanglePro(rl.NewRectangle(rx, ry, 14, 330), rl.NewVector2(7, 320), rot, rl.NewColor(130, 90, 50, 255))
+		if p.Fishing {
+			rl.DrawText("fishing...", int32(rx-60), int32(ry-120), 16, rl.LightGray)
+		}
+		return
 	case ItemBow:
 		rx := sw*0.70 + bobX
 		ry := sh - 90 + bobY
@@ -1999,7 +2116,7 @@ func (g *Game) drawHotbar(sw, sh int32) {
 				drawSwordIcon(cx, cy, slot*0.9, p.SwordTier)
 			case ItemPickaxe:
 				drawPickIcon(cx, cy, slot*0.9, p.PickTier)
-			case ItemBlock, ItemFood, ItemBow:
+			case ItemBlock, ItemFood, ItemBow, ItemRod:
 				g.drawBlockIcon(it.Block, x+9, y0+9, slot-18)
 				if it.Kind == ItemBow {
 					cnt := fmt.Sprintf("%d", p.Inv[ArrowItem])
@@ -2037,6 +2154,8 @@ func (g *Game) drawHotbar(sw, sh int32) {
 		name = blocks[p.Held.Block].Name + "  (right click to eat)"
 	case ItemBow:
 		name = fmt.Sprintf("Bow  (%d arrows)", p.Inv[ArrowItem])
+	case ItemRod:
+		name = "Fishing Rod  (click at water to cast, click again when it bites)"
 	}
 	if len(hb) > hotbarSlots {
 		name += "   (wheel scrolls)"
@@ -2284,6 +2403,11 @@ func (g *Game) drawFullMap(sw, sh int32) {
 	}
 	sx, sy := toMap(g.Spawn.X, g.Spawn.Z)
 	rl.DrawRectangleLines(int32(sx)-5, int32(sy)-5, 10, 10, rl.SkyBlue)
+	if b := g.World.Beacon; b.Y > 0 {
+		bx, by := toMap(b.X, b.Z)
+		rl.DrawRectanglePro(rl.NewRectangle(bx, by, 14, 14), rl.NewVector2(7, 7), 45, rl.NewColor(120, 220, 255, 255))
+		rl.DrawText("beacon", int32(bx)+10, int32(by)-8, 16, rl.NewColor(120, 220, 255, 255))
+	}
 	p := g.Player
 	x, y := toMap(p.Pos.X, p.Pos.Z)
 	f := p.FlatForward()
@@ -2308,6 +2432,8 @@ func (g *Game) drawHelp(sw, sh int32) {
 		"Online: T chat   P player list      Creative mode (G in pause): fly with double-tap SPACE, build freely",
 		"K achievements   N (pause) music on/off      Doors: 4 planks, right click to open. Trader: right click to trade",
 		"Villages: right click a villager (?) for a quest. Guards fight the undead; keep the others safe.",
+		"Goal: find the ancient beacon tower (see the compass) and light it with 3 diamond ore.",
+		"Wolves: feed one meat or fish twice to tame it. Fishing rod: planks and wool; cast at water.",
 		"H closes this help",
 	}
 	w := int32(760)
@@ -2403,6 +2529,18 @@ func (g *Game) drawMinimap(sw int32) {
 	label := fmt.Sprintf("Facing %s  (%d, %d, %d)", dirs[int((deg+22.5)/45)%8], floorI(wp.X), floorI(wp.Y), floorI(wp.Z))
 	rl.DrawRectangle(mx, my+size+4, size, 22, rl.NewColor(0, 0, 0, 140))
 	rl.DrawText(label, mx+6, my+size+8, 14, rl.LightGray)
+	if hint := g.beaconHint(); hint != "" {
+		rl.DrawRectangle(mx, my+size+28, size, 20, rl.NewColor(0, 0, 0, 140))
+		c := rl.NewColor(120, 220, 255, 255)
+		if g.World.BeaconLit {
+			c = rl.Gold
+		}
+		rl.DrawText(hint, mx+6, my+size+31, 14, c)
+	}
+	if b := g.World.Beacon; b.Y > 0 {
+		bx, by := toMap(b.X, b.Z)
+		rl.DrawRectanglePro(rl.NewRectangle(bx, by, 8, 8), rl.NewVector2(4, 4), 45, rl.NewColor(120, 220, 255, 255))
+	}
 }
 
 // updateSettings handles the setting hotkeys on the pause screen.
@@ -2895,13 +3033,16 @@ func (g *Game) scriptedShots(frame int) bool {
 	case 200:
 		rl.TakeScreenshot("shot_sky.png")
 	case 205:
-		// Stand on the east edge and look west across the wrap seam.
+		// Hover near the beacon tower and look at it.
 		p := g.Player
-		p.Pos = rl.NewVector3(float32(originX+worldW)-0.5, float32(g.World.SurfaceY(originX+worldW-1, 0)), 0.5)
-		p.Yaw = -math.Pi / 2 // face +X: across the edge
-		p.Pitch = -0.05
+		b := g.World.Beacon
+		p.Pos = rl.NewVector3(b.X-14, b.Y-6, b.Z+14)
+		p.Yaw = float32(math.Atan2(float64(b.X-p.Pos.X), float64(b.Z-p.Pos.Z)))
+		p.Pitch = 0.25
 		p.Flying, settings.Creative = true, true
-		p.Pos.Y += 6
+		wf := NewAnimal(rl.NewVector3(p.Pos.X+2, float32(g.World.SurfaceY(floorI(p.Pos.X+2), floorI(p.Pos.Z))), p.Pos.Z), AnimalWolf)
+		wf.Tamed = true
+		g.Animals = append(g.Animals, wf)
 	case 208:
 		rl.TakeScreenshot("shot_edge.png")
 		settings.Creative = false

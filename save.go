@@ -10,7 +10,7 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-const saveVersion = 5
+const saveVersion = 6
 
 // SaveData is the persisted state of a run: the whole voxel volume, the
 // player, the clock and the animals. Hostiles and drops are not kept.
@@ -31,6 +31,7 @@ type SaveData struct {
 	ArmorTier int
 	Spawn     rl.Vector3
 	Deaths    int
+	Won       bool
 	Hunger    float32
 	SkyT      float32
 	Day       int
@@ -50,6 +51,7 @@ type SavedAnimal struct {
 	Quest      int
 	QuestDone  bool
 	QuestKills int
+	Tamed      bool
 }
 
 func savePath() string {
@@ -100,12 +102,12 @@ func (g *Game) saveErr() error {
 		Version: saveVersion, NumBlocks: int(numBlocks), Blocks: g.World.Blocks, Seed: g.World.Seed,
 		Pos: pl.Pos, Yaw: pl.Yaw, Pitch: pl.Pitch, HP: pl.HP, Ammo: pl.Ammo, Reserve: pl.Reserve,
 		Inv: pl.Inv[:], SwordTier: pl.SwordTier, PickTier: pl.PickTier, ArmorTier: pl.ArmorTier,
-		Spawn: g.Spawn, Deaths: g.Deaths, Hunger: pl.Hunger,
+		Spawn: g.Spawn, Deaths: g.Deaths, Hunger: pl.Hunger, Won: g.Won,
 		SkyT: g.Sky.T, Day: g.Sky.Day, Night: g.Night, Score: g.Score, Kills: g.Kills,
 	}
 	for _, a := range g.Animals {
 		if a.Alive {
-			d.Animals = append(d.Animals, SavedAnimal{a.Kind, a.Pos, a.HP, a.Home, a.Prof, a.Name, a.Quest, a.QuestDone, a.QuestKills})
+			d.Animals = append(d.Animals, SavedAnimal{a.Kind, a.Pos, a.HP, a.Home, a.Prof, a.Name, a.Quest, a.QuestDone, a.QuestKills, a.Tamed})
 		}
 	}
 	tmp := p + ".tmp"
@@ -157,7 +159,7 @@ func (g *Game) load() bool {
 	pl.HP, pl.Ammo, pl.Reserve = d.HP, d.Ammo, d.Reserve
 	copy(pl.Inv[:], d.Inv)
 	pl.SwordTier, pl.PickTier, pl.ArmorTier = d.SwordTier, d.PickTier, d.ArmorTier
-	g.Spawn, g.Deaths = d.Spawn, d.Deaths
+	g.Spawn, g.Deaths, g.Won = d.Spawn, d.Deaths, d.Won
 	pl.Hunger = d.Hunger
 	pl.EnsureHeld()
 	g.Sky.T, g.Sky.Day = d.SkyT, d.Day
@@ -169,7 +171,8 @@ func (g *Game) load() bool {
 		a.HP = sa.HP
 		a.Home, a.Prof, a.Name = sa.Home, sa.Prof, sa.Name
 		a.Quest, a.QuestDone, a.QuestKills = sa.Quest%len(quests), sa.QuestDone, sa.QuestKills
-		if a.Kind == AnimalVillager {
+		a.Tamed = sa.Tamed
+		if a.Kind == AnimalVillager || a.Kind == AnimalWolf {
 			a.Walking = true
 		}
 		g.Animals = append(g.Animals, a)

@@ -819,3 +819,58 @@ func TestVillages(t *testing.T) {
 		t.Fatal("quest should be marked done")
 	}
 }
+
+// The beacon tower generates far from spawn and lighting it costs diamonds and wins.
+func TestBeaconAndWolves(t *testing.T) {
+	rand.Seed(18)
+	g := &Game{Audio: &Audio{}, CraftHover: -1}
+	g.Reset()
+	w := g.World
+	if w.Beacon.Y == 0 {
+		t.Fatal("beacon tower should exist")
+	}
+	if WrapDist(w.Beacon, g.Spawn) < 40 {
+		t.Fatalf("beacon too close to spawn: %v", WrapDist(w.Beacon, g.Spawn))
+	}
+	x, y, z := floorI(w.Beacon.X), floorI(w.Beacon.Y), floorI(w.Beacon.Z)
+	if w.Get(x, y, z) != Beacon || w.Get(x, y-1, z) != StoneBrick {
+		t.Fatal("beacon should sit on the tower roof")
+	}
+	p := g.Player
+	g.lightBeacon(x, y, z)
+	if g.Won || w.Get(x, y, z) != Beacon {
+		t.Fatal("lighting needs diamonds")
+	}
+	p.Inv[DiamondOre] = 3
+	g.lightBeacon(x, y, z)
+	if !g.Won || w.Get(x, y, z) != BeaconLit || p.Inv[DiamondOre] != 0 || !w.BeaconLit {
+		t.Fatal("three diamonds should light the beacon")
+	}
+	if g.beaconHint() != "Beacon lit" {
+		t.Fatalf("hint %q", g.beaconHint())
+	}
+	// Wolves: feeding twice tames; a tamed wolf hunts hostiles near its owner.
+	wf := NewAnimal(rl.NewVector3(p.Pos.X+2, p.Pos.Y, p.Pos.Z), AnimalWolf)
+	g.Animals = append(g.Animals, wf)
+	p.Inv[Meat] = 2
+	p.Held = Item{ItemFood, Meat}
+	g.tameWolf(wf)
+	if wf.Tamed {
+		t.Fatal("one piece of meat should not be enough")
+	}
+	p.Held = Item{ItemFood, Meat}
+	g.tameWolf(wf)
+	if !wf.Tamed || p.Inv[Meat] != 0 {
+		t.Fatal("second piece should tame the wolf")
+	}
+	e := NewEnemy(rl.NewVector3(p.Pos.X+3, p.Pos.Y, p.Pos.Z), KindZombie, 1)
+	g.Enemies = append(g.Enemies, e)
+	hp := e.HP
+	for i := 0; i < 60; i++ {
+		g.wolfTick(wf, 0.1)
+		wf.Update(0.1, w, g.localTarget())
+	}
+	if e.HP >= hp {
+		t.Fatalf("tamed wolf should attack the zombie: %d -> %d", hp, e.HP)
+	}
+}

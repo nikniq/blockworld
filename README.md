@@ -50,6 +50,13 @@ block textures and sound effects are generated at startup.
 - **A dinosaur** roams every world: a striped, two-legged beast three blocks tall that thuds as it walks
   and roars across the valley. Leave it alone and it ignores you. Hurt it and it charges and bites for
   serious damage until it loses interest. Slaying it is worth 800 points, eight meat and leather.
+- **The goal**: an ancient beacon tower stands far from spawn (the compass shows its bearing and
+  distance, and the map marks it). Climb it and light the beacon with three diamond ore to conquer
+  the world: 5000 points, fireworks and an achievement. The world carries on afterwards.
+- **Wolves** roam the forests and taiga. Feed one meat or fish twice and it is yours: it follows you,
+  teleports to catch up, and attacks hostiles near you. Wild wolves bite back if hurt.
+- **Fishing**: craft a rod from planks and wool, click at water to cast, and click again when the
+  float dips. Mostly fish (food), sometimes seeds or an old boot.
 - **Villages**: a few per world on flat grassland, each a ring of plank or cobblestone houses with doors,
   windows, beds and torches around a well. One villager lives in each house: farmers, guards and
   librarians, who wander by day, go home at night and run from the undead (guards draw their swords).

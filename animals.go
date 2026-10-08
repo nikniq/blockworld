@@ -18,6 +18,7 @@ const (
 	AnimalDino
 	AnimalTrader
 	AnimalVillager
+	AnimalWolf
 	numAnimalKinds
 )
 
@@ -41,6 +42,7 @@ var animalKinds = [...]animalSpec{
 	AnimalDino:     {"Dinosaur", 45, 2.2, 0.7, 2.8, rl.NewColor(70, 120, 60, 255), rl.NewColor(80, 130, 65, 255), rl.NewColor(60, 100, 50, 255), 8, 18},
 	AnimalTrader:   {"Wandering Trader", 20, 1.2, 0.3, 1.8, rl.NewColor(90, 60, 130, 255), rl.NewColor(205, 160, 120, 255), rl.NewColor(60, 40, 90, 255), 0, 0},
 	AnimalVillager: {"Villager", 20, 1.3, 0.3, 1.8, rl.NewColor(150, 110, 70, 255), rl.NewColor(205, 160, 120, 255), rl.NewColor(80, 60, 40, 255), 0, 0},
+	AnimalWolf:     {"Wolf", 16, 2.6, 0.35, 0.85, rl.NewColor(200, 200, 200, 255), rl.NewColor(210, 210, 210, 255), rl.NewColor(170, 170, 170, 255), 0, 6},
 }
 
 type Animal struct {
@@ -65,10 +67,13 @@ type Animal struct {
 	Quest      int
 	QuestDone  bool
 	QuestKills int // kills when a kill quest was accepted (-1: not yet)
-	Phase      float32
-	Alive      bool
-	DeathT     float32
-	Lum        float32
+	// Wolves.
+	Tamed  bool
+	AtkCD  float32
+	Phase  float32
+	Alive  bool
+	DeathT float32
+	Lum    float32
 }
 
 func NewAnimal(pos rl.Vector3, kind AnimalKind) *Animal {
@@ -184,6 +189,8 @@ func (a *Animal) Draw(w *World) {
 		kind, scale = SkinCow, 0.93
 	case AnimalSheep:
 		kind, scale = SkinSheep, 0.95
+	case AnimalWolf:
+		kind, scale = SkinWolf, 0.8
 	case AnimalVillager:
 		pose := Pose{Pos: a.Pos, Yaw: yawOf(a.Heading), Phase: a.Phase, Amp: 0, Scale: 0.9, Lum: a.Lum, Alpha: 1}
 		if a.Walking || a.Flee > 0 {
@@ -274,6 +281,15 @@ func (a *Animal) Draw(w *World) {
 		pose.Flash = (a.Flee - 4.7) / 0.3
 	}
 	skins.DrawQuadruped(w, kind, &pose)
+	if a.Kind == AnimalWolf && a.Tamed && a.Alive {
+		// Red collar.
+		fwd := a.Heading
+		if rl.Vector3Length(fwd) < 0.01 {
+			fwd = rl.NewVector3(0, 0, 1)
+		}
+		c := rl.Vector3Add(rl.NewVector3(a.Pos.X, a.Pos.Y+0.62*scale, a.Pos.Z), rl.Vector3Scale(fwd, 0.42*scale))
+		rl.DrawCubeV(c, rl.NewVector3(0.42*scale, 0.1, 0.42*scale), mul(rl.NewColor(220, 40, 40, 255), a.Lum))
+	}
 	if a.Alive && a.HP < a.Spec.HP {
 		top := a.Pos.Y + a.Spec.Height + 0.2
 		frac := float32(a.HP) / float32(a.Spec.HP)
@@ -289,6 +305,99 @@ func (g *Game) spawnAnimals(n int) {
 			continue
 		}
 		g.Animals = append(g.Animals, NewAnimal(p, AnimalKind(rand.Intn(int(AnimalDino)))))
+	}
+}
+
+// spawnWolves scatters a few wild wolves in forests and taiga.
+func (g *Game) spawnWolves(n int) {
+	for i := 0; i < n*4 && n > 0; i++ {
+		p := g.World.RandomFreePoint(g.Player.Pos, 20)
+		lx, lz := wrapX(floorI(p.X)-originX), wrapZ(floorI(p.Z)-originZ)
+		if b := g.World.Biome[lz*worldW+lx]; b != BiomeForest && b != BiomeTaiga {
+			continue
+		}
+		wf := NewAnimal(p, AnimalWolf)
+		wf.Walking = true
+		g.Animals = append(g.Animals, wf)
+		n--
+	}
+}
+
+// wolfTick: tamed wolves follow their owner and attack nearby hostiles; wild
+// wolves wander and bite back when hurt (the base Update handles that).
+func (g *Game) wolfTick(a *Animal, dt float32) {
+	a.AtkCD = max(0, a.AtkCD-dt)
+	if !a.Tamed {
+		return
+	}
+	p := g.Player
+	a.Flee = 0 // never turns on its owner
+	// Attack hostiles near the owner.
+	var threat *Enemy
+	td := float32(99)
+	for _, e := range g.Enemies {
+		if e.Alive && e.Kind != KindCreeper {
+			if d := WrapDist(e.Pos, a.Pos); d < td && WrapDist(e.Pos, p.Pos) < 12 {
+				threat, td = e, d
+			}
+		}
+	}
+	if threat != nil && td < 10 {
+		a.Heading = rl.Vector3Normalize(WrapDelta(threat.Pos, a.Pos))
+		a.Heading.Y = 0
+		a.Walking = true
+		a.WanderT = 0.3
+		if td < 1.6 && a.AtkCD == 0 {
+			a.AtkCD = 0.9
+			g.burst(rl.Vector3Add(threat.Pos, rl.NewVector3(0, 0.8, 0)), rl.NewColor(255, 90, 90, 255), 5)
+			if threat.Hit(3) {
+				g.killEnemy(threat, threat.Spec.Points/2)
+			}
+		}
+		return
+	}
+	// Follow the owner: close the gap when far, teleport if very far.
+	d := WrapDelta(p.Pos, a.Pos)
+	d.Y = 0
+	dist := rl.Vector3Length(d)
+	switch {
+	case dist > 24:
+		a.Pos = rl.Vector3Add(p.Pos, rl.NewVector3(1.5, 0.2, 1.5))
+	case dist > 4:
+		a.Heading = rl.Vector3Scale(d, 1/dist)
+		a.Walking = true
+		a.WanderT = 0.3
+	case dist < 2.5:
+		a.Walking = false
+		a.WanderT = 0.8
+	}
+}
+
+// tameWolf feeds a wolf: a few pieces of meat make it loyal.
+func (g *Game) tameWolf(a *Animal) {
+	p := g.Player
+	if p.Held.Kind != ItemFood || (p.Held.Block != Meat && p.Held.Block != CookedMeat && p.Held.Block != Fish) {
+		g.say("The wolf eyes you. Offer it meat or fish.", 1.8)
+		return
+	}
+	p.Inv[p.Held.Block]--
+	p.EnsureHeld()
+	a.Flee = 0
+	a.HP = min(a.Spec.HP, a.HP+6)
+	g.burst(rl.Vector3Add(a.Pos, rl.NewVector3(0, 0.8, 0)), rl.NewColor(255, 120, 150, 255), 8)
+	g.Audio.Play(g.Audio.Eat, 0.6)
+	if a.Tamed {
+		g.say("Your wolf is well fed", 1.2)
+		return
+	}
+	a.Visit++
+	if a.Visit >= 2 {
+		a.Tamed = true
+		g.say("The wolf is yours. It will follow you and fight for you.", 3)
+		g.Audio.Play(g.Audio.Clear, 0.7)
+		g.unlock(AchWolf)
+	} else {
+		g.say("The wolf wags its tail. One more should do it.", 1.8)
 	}
 }
 
@@ -341,6 +450,9 @@ func (g *Game) updateAnimals(dt float32) {
 		if a.Alive && a.Kind == AnimalVillager {
 			g.villagerTick(a, dt)
 		}
+		if a.Alive && a.Kind == AnimalWolf {
+			g.wolfTick(a, dt)
+		}
 		t := g.nearestTarget(a.Pos)
 		if bite := a.Update(dt, g.World, t); bite > 0 {
 			g.hurtTargetFrom(t.ID, int(float32(bite)*damageScale()+0.5), "was eaten by a Dinosaur", true, a.Pos, 7)
@@ -384,6 +496,15 @@ func (g *Game) updateAnimals(dt float32) {
 		if herd < 10 && !g.Sky.IsNight() {
 			g.spawnAnimals(2)
 		}
+		wolves := 0
+		for _, a := range g.Animals {
+			if a.Alive && a.Kind == AnimalWolf && !a.Tamed {
+				wolves++
+			}
+		}
+		if wolves < 3 && rand.Float32() < 0.3 {
+			g.spawnWolves(1)
+		}
 		if g.dinosaurs() == 0 && rand.Float32() < 0.35 {
 			g.spawnDinosaur()
 		}
@@ -412,6 +533,10 @@ func (g *Game) killAnimal(a *Animal) {
 		g.spawnDrop(c, Meat, 0)
 	}
 	switch a.Kind {
+	case AnimalWolf:
+		if a.Tamed {
+			g.say("Your wolf has fallen", 2.5)
+		}
 	case AnimalVillager:
 		g.Score -= 200
 		g.say("You killed a villager  -200", 2)

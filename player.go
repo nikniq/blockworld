@@ -40,6 +40,7 @@ const (
 	ItemBlock
 	ItemFood
 	ItemBow
+	ItemRod
 )
 
 // Item is one hotbar entry: a tool, or a stack of blocks from the inventory.
@@ -70,6 +71,10 @@ type Player struct {
 	Hunger    float32 // 0..20, drains with time and effort
 	StarveT   float32
 	Knock     rl.Vector3 // knockback velocity from a hit
+	Fishing   bool
+	Bobber    rl.Vector3
+	BiteT     float32 // seconds until the fish bites (counts down), negative while biting
+	BiteOpen  float32 // seconds left to reel in
 	BowCD     float32
 	Flying    bool    // creative flight
 	JumpTapT  float32 // seconds since the last jump press (double tap toggles flight)
@@ -183,6 +188,8 @@ func (p *Player) Hotbar() []Item {
 			items = append(items, Item{ItemFood, b})
 		} else if b == Bow && p.Inv[b] > 0 {
 			items = append(items, Item{ItemBow, b})
+		} else if b == Rod && p.Inv[b] > 0 {
+			items = append(items, Item{ItemRod, b})
 		}
 	}
 	return items

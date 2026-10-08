@@ -55,6 +55,9 @@ const (
 	PatBow
 	PatArrow
 	PatDoor
+	PatBeacon
+	PatFish
+	PatRod
 )
 
 const (
@@ -406,6 +409,38 @@ func texel(p texPattern, base rl.Color, info *blockInfo, x, y, seed int) rl.Colo
 			return rl.NewColor(230, 200, 60, 255) // handle
 		}
 		return mul(base, 0.85+0.3*hash2(x/3, y, seed))
+	case PatBeacon:
+		dx, dy := x-7, y-7
+		if dx*dx+dy*dy < 12 {
+			return mul(rl.NewColor(230, 250, 255, 255), 0.9+0.15*n) // glowing core
+		}
+		if x == 0 || y == 0 || x == tileSize-1 || y == tileSize-1 || (x+y)%8 == 0 {
+			return mul(rl.NewColor(40, 60, 80, 255), 0.9+0.2*n) // dark frame
+		}
+		return mul(base, 0.85+0.3*n)
+	case PatFish:
+		dx, dy := float32(x)-6, float32(y)-8
+		if dx*dx/25+dy*dy/6 < 1 {
+			if x == 4 && y == 7 {
+				return rl.NewColor(20, 20, 20, 255) // eye
+			}
+			return mul(base, 0.8+0.4*n)
+		}
+		if x >= 11 && x <= 14 && y >= 5 && y <= 11 && abs(y-8) <= x-10 {
+			return mul(base, 0.7+0.3*n) // tail
+		}
+		return rl.NewColor(0, 0, 0, 0)
+	case PatRod:
+		if x == 15-y && y > 2 {
+			return mul(base, 0.85+0.3*n) // the rod, diagonal
+		}
+		if x == 3 && y >= 1 && y <= 12 {
+			return rl.NewColor(230, 230, 225, 255) // line
+		}
+		if x == 3 && y == 13 {
+			return rl.NewColor(220, 60, 60, 255) // bobber
+		}
+		return rl.NewColor(0, 0, 0, 0)
 	case PatTorch:
 		if y < 6 {
 			return mul(blocks[Torch].Top, 0.85+0.3*n)
