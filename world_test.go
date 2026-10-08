@@ -73,18 +73,18 @@ func TestWaterNotSolid(t *testing.T) {
 		switch {
 		case y == 0:
 			b = Bedrock
-		case y < 5:
+		case y < groundBase+5:
 			b = Stone
 		case y <= seaLevel:
 			b = Water
 		}
 		w.Set(x, y, z, b)
 	}
-	if w.Solid(x, 7, z) || !w.IsWater(x, 7, z) {
+	if w.Solid(x, seaLevel-2, z) || !w.IsWater(x, seaLevel-2, z) {
 		t.Fatal("water must not block movement")
 	}
-	if w.SurfaceY(x, z) != 5 {
-		t.Fatalf("ground height %d, want 5", w.SurfaceY(x, z))
+	if w.SurfaceY(x, z) != groundBase+5 {
+		t.Fatalf("ground height %d, want %d", w.SurfaceY(x, z), groundBase+5)
 	}
 	lx, lz := x-originX, z-originZ
 	if w.Height[lz*worldW+lx] != seaLevel+1 {
@@ -375,7 +375,7 @@ func TestLavaSaplingLadder(t *testing.T) {
 		if b == Lava {
 			lava++
 			y := i / (worldW * worldD)
-			if y > 5 {
+			if y > 8 {
 				t.Fatalf("lava at height %d", y)
 			}
 		}
@@ -486,7 +486,7 @@ func TestDungeonsAndLoot(t *testing.T) {
 		switch b {
 		case Spawner:
 			spawners++
-			if y > 17 {
+			if y > groundBase+17 {
 				t.Fatalf("spawner too high at y=%d", y)
 			}
 		case Crate:
@@ -680,7 +680,7 @@ func TestDoorsTraderMineshaft(t *testing.T) {
 	}
 	planks := 0
 	for i, b := range w.Blocks {
-		if b == Planks && i/(worldW*worldD) < 20 {
+		if b == Planks && i/(worldW*worldD) < groundBase+20 {
 			planks++
 		}
 	}
@@ -939,5 +939,52 @@ func TestOutbackWildlife(t *testing.T) {
 	g.killAnimal(ko)
 	if g.Score != score-100 {
 		t.Fatal("koalas are protected")
+	}
+}
+
+// The deep: deep stone, big caverns, lakes, glowshrooms, amethyst and diamonds only at depth.
+func TestDeepCaves(t *testing.T) {
+	rand.Seed(20)
+	w := NewWorld()
+	deep, air, water, shroom, amethyst, diamondHigh := 0, 0, 0, 0, 0, 0
+	for i, b := range w.Blocks {
+		y := i / (worldW * worldD)
+		switch b {
+		case DeepStone:
+			deep++
+		case Glowshroom:
+			shroom++
+		case Amethyst:
+			amethyst++
+		case Air:
+			if y < deepTop {
+				air++
+			}
+		case Water:
+			if y < deepTop {
+				water++
+			}
+		case DiamondOre:
+			if y > deepTop {
+				diamondHigh++
+			}
+		}
+	}
+	if deep == 0 || shroom == 0 || amethyst == 0 {
+		t.Fatalf("deep layer missing: stone %d shrooms %d amethyst %d", deep, shroom, amethyst)
+	}
+	if air < 20000 || water == 0 {
+		t.Fatalf("deep caverns and lakes expected: air %d water %d", air, water)
+	}
+	if diamondHigh > 0 {
+		t.Fatalf("diamonds should only lie in the deep, found %d above", diamondHigh)
+	}
+	if w.blockLocal(0, 0, 0) != 0 && blocks[Glowshroom].Emit == 0 {
+		t.Fatal("glowshrooms should emit light")
+	}
+	// Surface sits above the deep and the sea is at the new level.
+	s := w.SpawnPoint()
+	if s.Y < groundBase+5 || seaLevel != groundBase+10 {
+		t.Fatalf("spawn %v, sea %d", s, seaLevel)
 	}
 }

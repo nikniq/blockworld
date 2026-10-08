@@ -10,7 +10,7 @@ import (
 const (
 	dayLength = 360.0 // seconds for a full day/night cycle
 	dayFrac   = 0.6   // fraction of the cycle with the sun up
-	cloudY    = 84
+	cloudY    = groundBase + 84
 	cloudCell = 8
 )
 

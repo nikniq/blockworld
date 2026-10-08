@@ -21,6 +21,7 @@ const (
 	KindBrute
 	KindSkeleton
 	KindGiant
+	KindCaveSpider
 )
 
 type kindSpec struct {
@@ -42,12 +43,13 @@ type kindSpec struct {
 }
 
 var kinds = [...]kindSpec{
-	KindZombie:   {"Zombie", 4, 2.4, 0.35, 1.9, 0.33, 12, 100, rl.NewColor(40, 120, 170, 255), rl.NewColor(70, 150, 70, 255), rl.NewColor(20, 20, 20, 255), true, false, false, false},
-	KindSpider:   {"Spider", 3, 4.6, 0.6, 0.9, 0.3, 8, 125, rl.NewColor(45, 35, 40, 255), rl.NewColor(60, 45, 50, 255), rl.NewColor(230, 40, 40, 255), true, false, false, false},
-	KindCreeper:  {"Creeper", 4, 2.9, 0.3, 1.7, 0.3, 0, 200, rl.NewColor(70, 160, 60, 255), rl.NewColor(80, 175, 70, 255), rl.NewColor(10, 10, 10, 255), false, true, false, false},
-	KindBrute:    {"Zombie Brute", 14, 1.7, 0.45, 2.6, 0.45, 30, 300, rl.NewColor(90, 60, 130, 255), rl.NewColor(60, 130, 60, 255), rl.NewColor(230, 60, 60, 255), true, false, false, false},
-	KindSkeleton: {"Skeleton", 4, 2.6, 0.3, 1.9, 0.3, 0, 150, rl.NewColor(205, 205, 200, 255), rl.NewColor(215, 215, 210, 255), rl.NewColor(40, 40, 40, 255), true, false, true, false},
-	KindGiant:    {"Giant", 60, 1.3, 0.8, 4.2, 0.7, 40, 1500, rl.NewColor(60, 110, 60, 255), rl.NewColor(80, 150, 70, 255), rl.NewColor(255, 60, 60, 255), false, false, false, true},
+	KindZombie:     {"Zombie", 4, 2.4, 0.35, 1.9, 0.33, 12, 100, rl.NewColor(40, 120, 170, 255), rl.NewColor(70, 150, 70, 255), rl.NewColor(20, 20, 20, 255), true, false, false, false},
+	KindSpider:     {"Spider", 3, 4.6, 0.6, 0.9, 0.3, 8, 125, rl.NewColor(45, 35, 40, 255), rl.NewColor(60, 45, 50, 255), rl.NewColor(230, 40, 40, 255), true, false, false, false},
+	KindCreeper:    {"Creeper", 4, 2.9, 0.3, 1.7, 0.3, 0, 200, rl.NewColor(70, 160, 60, 255), rl.NewColor(80, 175, 70, 255), rl.NewColor(10, 10, 10, 255), false, true, false, false},
+	KindBrute:      {"Zombie Brute", 14, 1.7, 0.45, 2.6, 0.45, 30, 300, rl.NewColor(90, 60, 130, 255), rl.NewColor(60, 130, 60, 255), rl.NewColor(230, 60, 60, 255), true, false, false, false},
+	KindSkeleton:   {"Skeleton", 4, 2.6, 0.3, 1.9, 0.3, 0, 150, rl.NewColor(205, 205, 200, 255), rl.NewColor(215, 215, 210, 255), rl.NewColor(40, 40, 40, 255), true, false, true, false},
+	KindGiant:      {"Giant", 60, 1.3, 0.8, 4.2, 0.7, 40, 1500, rl.NewColor(60, 110, 60, 255), rl.NewColor(80, 150, 70, 255), rl.NewColor(255, 60, 60, 255), false, false, false, true},
+	KindCaveSpider: {"Cave Spider", 3, 5.2, 0.4, 0.6, 0.22, 7, 140, rl.NewColor(30, 60, 70, 255), rl.NewColor(40, 70, 80, 255), rl.NewColor(80, 230, 120, 255), false, false, false, false},
 }
 
 // Target is something hostiles chase: the local player or a remote one.
@@ -173,7 +175,8 @@ func (e *Enemy) Update(dt float32, w *World, nav *NavGrid, p Target, others []*E
 	var delta rl.Vector3
 	if !hissing && dist > e.AttackRange()*0.8 {
 		want := rl.Vector3Scale(to, 1/dist)
-		if dist > 2.5 {
+		underground := e.Pos.Y < float32(w.SurfaceY(floorI(e.Pos.X), floorI(e.Pos.Z)))-2
+		if dist > 2.5 && !underground {
 			if d, ok := nav.Dir(e.Pos); ok {
 				want = d
 			}
@@ -270,7 +273,7 @@ func (e *Enemy) modelScale() float32 {
 	switch e.Kind {
 	case KindCreeper:
 		return e.Spec.Height / 1.625
-	case KindSpider:
+	case KindSpider, KindCaveSpider:
 		return e.Spec.Height / 0.95
 	}
 	return e.Spec.Height / 2.0
@@ -294,7 +297,10 @@ func (e *Enemy) Draw(w *World) {
 		pose.Amp = 0
 	}
 	switch e.Kind {
-	case KindSpider:
+	case KindSpider, KindCaveSpider:
+		if e.Kind == KindCaveSpider {
+			pose.Scale = 0.65
+		}
 		skins.DrawSpider(w, &pose)
 	case KindCreeper:
 		skins.DrawCreeper(w, &pose)
@@ -341,7 +347,7 @@ func (e *Enemy) DrawGlow() {
 	}
 	side := rl.NewVector3(-fwd.Z, 0, fwd.X)
 	sc := e.modelScale()
-	if e.Kind == KindSpider {
+	if e.Kind == KindSpider || e.Kind == KindCaveSpider {
 		hp := rl.Vector3Add(rl.NewVector3(e.Pos.X, e.Pos.Y+0.6*sc, e.Pos.Z), rl.Vector3Scale(fwd, 0.88*sc))
 		for _, sg := range []float32{-1.5, -0.5, 0.5, 1.5} {
 			rl.DrawCubeV(rl.Vector3Add(hp, rl.Vector3Scale(side, sg*0.1*sc)), rl.NewVector3(0.06, 0.06, 0.03), s.Eyes)

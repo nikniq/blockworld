@@ -58,6 +58,8 @@ const (
 	PatBeacon
 	PatFish
 	PatRod
+	PatShroom
+	PatAmethyst
 )
 
 const (
@@ -441,6 +443,22 @@ func texel(p texPattern, base rl.Color, info *blockInfo, x, y, seed int) rl.Colo
 			return rl.NewColor(220, 60, 60, 255) // bobber
 		}
 		return rl.NewColor(0, 0, 0, 0)
+	case PatShroom:
+		if y <= 7 && (x-7)*(x-7)+(y-6)*(y-6)*2 < 30 {
+			if hash2(x, y, seed+2) < 0.2 {
+				return rl.NewColor(230, 250, 255, 255) // glowing spots
+			}
+			return mul(base, 0.85+0.3*n)
+		}
+		if y > 7 && x >= 6 && x <= 9 {
+			return mul(rl.NewColor(200, 210, 200, 255), 0.85+0.3*n) // stalk
+		}
+		return rl.NewColor(0, 0, 0, 0)
+	case PatAmethyst:
+		if (x+y)%5 == 0 || (x-y+16)%7 == 0 {
+			return mul(rl.NewColor(230, 200, 255, 255), 0.9+0.2*n) // crystal facets
+		}
+		return mul(base, 0.8+0.35*n)
 	case PatTorch:
 		if y < 6 {
 			return mul(blocks[Torch].Top, 0.85+0.3*n)

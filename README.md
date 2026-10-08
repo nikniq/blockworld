@@ -8,7 +8,7 @@ block textures and sound effects are generated at startup.
 
 - The world has no edges: it wraps around, so walking east you eventually arrive from the west with
   terrain, caves, light and hostiles continuing seamlessly across the seam.
-- A 192x192x64 block world is generated every run: hills, a mountain band, beaches, a sea,
+- A 192x192x96 block world is generated every run: hills, a mountain band, beaches, a sea,
   winding caves and ore veins (coal, iron, gold, diamond), plus stone-brick ruins for cover.
 - **Biomes**: plains with tall grass and flowers, oak and birch forests, deserts with cacti (they sting),
   snowy taiga with tall spruces, and red-sand outback with pale eucalyptus and dead bushes.
@@ -81,6 +81,11 @@ block textures and sound effects are generated at startup.
   hold it and right click to eat for 30 health.
 - **TNT**: craft it from sand and coal, place it, then shoot it or hit it with the sword. It falls,
   flashes for a few seconds and blows a large crater. Nearby TNT chains.
+- **The deep**: the world is 96 blocks tall and the surface sits high, so below the hills lies a whole
+  underground layer of darker deep stone with vast halls and wide tunnels, underground lakes, lava at the
+  very bottom, glowshrooms that light the floors (and can be eaten), amethyst crystals that glow and sell
+  to the trader, and the only diamonds in the world. Ravines split the surface open down into it, and
+  cave spiders breed in the dark around anyone exploring down there.
 - **Lava** pools at the bottom of the deepest caves. It glows, burns anything that touches it and destroys
   dropped items. Place blocks into it to cross.
 - **Beds**: craft one from planks and wool (sheep drop wool), place it and right click it at night to sleep

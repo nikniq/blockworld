@@ -93,6 +93,7 @@ type Game struct {
 	ShowMap     bool
 	RainCD      float32
 	SpawnerCD   float32
+	DeepCD      float32
 
 	Net            *Net
 	JoinText       string
@@ -1210,6 +1211,45 @@ func (g *Game) giantSmash(e *Enemy) {
 	g.Audio.Play(g.Audio.Dig, 0.6)
 }
 
+// tickDeep breeds cave spiders in the dark around anyone exploring below the surface.
+func (g *Game) tickDeep(dt float32) {
+	g.DeepCD -= dt
+	if g.DeepCD > 0 || settings.Difficulty == 0 {
+		return
+	}
+	g.DeepCD = 6 + rand.Float32()*8
+	w := g.World
+	for _, t := range g.targets() {
+		if t.ID&villagerIDBit != 0 || t.Pos.Y >= float32(deepTop)+4 {
+			continue
+		}
+		deep := 0
+		for _, e := range g.Enemies {
+			if e.Alive && e.Kind == KindCaveSpider && WrapDist(e.Pos, t.Pos) < 30 {
+				deep++
+			}
+		}
+		if deep >= 4 {
+			continue
+		}
+		for try := 0; try < 12; try++ {
+			x := floorI(t.Pos.X) + rand.Intn(21) - 10
+			y := floorI(t.Pos.Y) + rand.Intn(7) - 3
+			z := floorI(t.Pos.Z) + rand.Intn(21) - 10
+			if y < 2 || !w.Solid(x, y-1, z) || w.Get(x, y, z) != Air || w.Get(x, y+1, z) != Air {
+				continue
+			}
+			lx, lz := wrapX(x-originX), wrapZ(z-originZ)
+			if w.blockLocal(lx, y, lz) >= 6 || WrapDist(rl.NewVector3(float32(x)+0.5, float32(y), float32(z)+0.5), t.Pos) < 5 {
+				continue
+			}
+			e := NewEnemy(rl.NewVector3(float32(x)+0.5, float32(y), float32(z)+0.5), KindCaveSpider, max(1, g.Night))
+			g.Enemies = append(g.Enemies, e)
+			break
+		}
+	}
+}
+
 // tickSpawners lets monster spawners near the player breed hostiles in the dark.
 func (g *Game) tickSpawners(dt float32) {
 	g.SpawnerCD -= dt
@@ -1511,6 +1551,7 @@ func (g *Game) worldUpdate(dt float32) {
 	g.burnInLava(dt)
 	g.growSaplings(dt)
 	g.tickSpawners(dt)
+	g.tickDeep(dt)
 	g.updateSleep(dt)
 }
 
@@ -2454,6 +2495,7 @@ func (g *Game) drawHelp(sw, sh int32) {
 		"Goal: find the ancient beacon tower (see the compass) and light it with 3 diamond ore.",
 		"Wolves: feed one meat or fish twice to tame it. Fishing rod: planks and wool; cast at water.",
 		"Outback: red sand, eucalyptus, kangaroos, emus, wombats. Koalas and platypuses are protected. Mind the crocodiles.",
+		"The deep: below the dark stone lie vast caverns, lakes, ravines, glowshrooms, amethyst, diamonds and cave spiders.",
 		"H closes this help",
 	}
 	w := int32(760)
@@ -2499,7 +2541,7 @@ func (g *Game) refreshMinimap(dt float32) {
 				depth := float32(h-w.Ground[lz*worldW+lx]) / 8
 				c = mix(rl.NewColor(60, 120, 220, 255), rl.NewColor(20, 40, 120, 255), depth)
 			}
-			s := 0.5 + 0.5*float32(h)/36
+			s := 0.5 + 0.5*float32(h-groundBase)/36
 			c = mul(c, s)
 			img.SetRGBA(lx, lz, color.RGBA{c.R, c.G, c.B, 255})
 		}

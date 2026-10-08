@@ -10,14 +10,16 @@ import (
 // The world is a fixed voxel volume. Block coordinates run from originX/originZ
 // (inclusive) to originX+worldW / originZ+worldD (exclusive) on X/Z and 0..worldH on Y.
 const (
-	worldW    = 192
-	worldH    = 64
-	worldD    = 192
-	chunkSize = 16
-	originX   = -worldW / 2
-	originZ   = -worldD / 2
-	seaLevel  = 10                            // every air cell at or below this height is filled with water
-	areaScale = (worldW * worldD) / (96 * 96) // feature counts were tuned on a 96x96 map
+	worldW     = 192
+	worldH     = 96
+	worldD     = 192
+	chunkSize  = 16
+	originX    = -worldW / 2
+	originZ    = -worldD / 2
+	groundBase = 32                            // the surface terrain starts this far up; below is the deep
+	seaLevel   = groundBase + 10               // every air cell at or below this height is filled with water
+	deepTop    = groundBase - 4                // deep stone, big caverns and the richest ores lie below here
+	areaScale  = (worldW * worldD) / (96 * 96) // feature counts were tuned on a 96x96 map
 )
 
 type Block uint8
@@ -71,6 +73,9 @@ const (
 	BeaconLit
 	Fish
 	Rod
+	DeepStone
+	Glowshroom
+	Amethyst
 	RedSand
 	EucLog
 	EucLeaves
@@ -256,6 +261,12 @@ var blocks = [numBlocks]blockInfo{
 		Pat: [3]texPattern{PatFish, PatFish, PatFish}, MineTime: 0.1, Drops: Fish, Food: 5},
 	Rod: {Name: "Fishing Rod", Top: col(130, 90, 50), Side: col(130, 90, 50), Bottom: col(130, 90, 50),
 		Pat: [3]texPattern{PatRod, PatRod, PatRod}, MineTime: 0.1, Drops: Rod, Item: true},
+	DeepStone: {Name: "Deep Stone", Top: col(70, 72, 80), Side: col(66, 68, 76), Bottom: col(60, 62, 70),
+		Pat: [3]texPattern{PatNoise, PatNoise, PatNoise}, MineTime: 4.5, Hard: true, Drops: Cobble, Solid: true},
+	Glowshroom: {Name: "Glowshroom", Top: col(120, 200, 230), Side: col(120, 200, 230), Bottom: col(120, 200, 230),
+		Pat: [3]texPattern{PatShroom, PatShroom, PatShroom}, MineTime: 0.05, Drops: Glowshroom, Tiny: true, Box: &saplingBox, Cross: true, Emit: 9, Food: 3},
+	Amethyst: {Name: "Amethyst", Top: col(170, 110, 230), Side: col(160, 100, 220), Bottom: col(140, 90, 200),
+		Pat: [3]texPattern{PatAmethyst, PatAmethyst, PatAmethyst}, MineTime: 3.5, Hard: true, MinTier: TierStone, Drops: Amethyst, Solid: true, Emit: 7},
 	RedSand: {Name: "Red Sand", Top: col(190, 95, 50), Side: col(182, 90, 48), Bottom: col(170, 85, 45),
 		Pat: [3]texPattern{PatSand, PatSand, PatSand}, MineTime: 0.5, Drops: RedSand, Solid: true},
 	EucLog: {Name: "Eucalyptus Log", Top: col(200, 180, 150), Side: col(215, 205, 190), Bottom: col(200, 180, 150),
@@ -661,7 +672,7 @@ func (w *World) generate(seed int) {
 			fx, fz := float32(x), float32(z)
 			n := 0.5*pnoise(fx/48, fz/48, seed, worldW/48, worldD/48) + 0.3*pnoise(fx/16, fz/16, seed+1, worldW/16, worldD/16) +
 				0.15*pnoise(fx/6, fz/6, seed+2, worldW/6, worldD/6) + 0.05*pnoise(fx/3, fz/3, seed+3, worldW/3, worldD/3)
-			h := 5 + int(n*n*30+n*6)
+			h := groundBase + 5 + int(n*n*30+n*6)
 			if m := pnoise(fx/32, fz/32, seed+4, worldW/32, worldD/32); m > 0.62 {
 				h += int((m - 0.62) * 70)
 			}
@@ -669,9 +680,9 @@ func (w *World) generate(seed int) {
 			dx, dz := float32(x+originX), float32(z+originZ)
 			if d := float32(math.Sqrt(float64(dx*dx + dz*dz))); d < 10 {
 				t := clamp(d/10, 0, 1)
-				h = int(lerp(14, float32(h), t*t))
+				h = int(lerp(groundBase+14, float32(h), t*t))
 			}
-			h = int(clamp(float32(h), 5, worldH-8))
+			h = int(clamp(float32(h), groundBase+5, worldH-8))
 			heights[z*worldW+x] = h
 			biome := biomeAt(x, z, seed)
 			biomes[z*worldW+x] = biome
@@ -688,7 +699,7 @@ func (w *World) generate(seed int) {
 						b = Sand
 					} else if outback {
 						b = RedSand
-					} else if h >= 40 || (biome == BiomeTaiga && h >= 20) {
+					} else if h >= groundBase+40 || (biome == BiomeTaiga && h >= groundBase+20) {
 						b = Snow
 					}
 				case y >= h-4:
@@ -699,7 +710,9 @@ func (w *World) generate(seed int) {
 						b = RedSand
 					}
 				default:
-					if vnoise3p(fx/8, float32(y)/7, fz/8, seed+5, worldW/8, worldD/8) > 0.8 {
+					if y < deepTop {
+						b = DeepStone
+					} else if vnoise3p(fx/8, float32(y)/7, fz/8, seed+5, worldW/8, worldD/8) > 0.8 {
 						b = Gravel
 					}
 				}
@@ -722,22 +735,74 @@ func (w *World) generate(seed int) {
 				fx, fy, fz := float32(x), float32(y), float32(z)
 				a := vnoise3p(fx/12, fy/9, fz/12, seed+11, worldW/12, worldD/12)
 				b := vnoise3p(fx/12, fy/9, fz/12, seed+12, worldW/12, worldD/12)
-				tunnel := math.Abs(float64(a-0.5)) < 0.05 && math.Abs(float64(b-0.5)) < 0.05
-				cavern := vnoise3p(fx/8, fy/6, fz/8, seed+13, worldW/8, worldD/8) > 0.76
+				width := float32(0.05)
+				cavernAt := float32(0.76)
+				if y < deepTop {
+					width = 0.075                                                          // wider tunnels in the deep
+					cavernAt = 0.68 - 0.1*clamp(float32(deepTop-y)/float32(deepTop), 0, 1) // and vast caverns
+				}
+				tunnel := math.Abs(float64(a-0.5)) < float64(width) && math.Abs(float64(b-0.5)) < float64(width)
+				cavern := vnoise3p(fx/8, fy/6, fz/8, seed+13, worldW/8, worldD/8) > cavernAt
+				if y < deepTop && vnoise3p(fx/16, fy/10, fz/16, seed+14, worldW/16, worldD/16) > 0.72 {
+					cavern = true // deep halls
+				}
 				if tunnel || cavern {
 					w.setLocal(x, y, z, Air)
 				}
 			}
 		}
 	}
-	// Lava pools at the bottom of the deepest caves.
+	// Lava pools at the very bottom, underground lakes a little higher, and
+	// glowing mushrooms and amethyst in the deep.
 	for z := 0; z < worldD; z++ {
 		for x := 0; x < worldW; x++ {
-			for y := 1; y <= 5; y++ {
+			for y := 1; y <= 8; y++ {
 				if w.getLocal(x, y, z) == Air && heights[z*worldW+x] > y+3 {
 					w.setLocal(x, y, z, Lava)
 				}
 			}
+			for y := 9; y <= 16; y++ {
+				if w.getLocal(x, y, z) == Air && heights[z*worldW+x] > y+3 && pnoise(float32(x)/24, float32(z)/24, seed+15, worldW/24, worldD/24) > 0.55 {
+					w.setLocal(x, y, z, Water)
+				}
+			}
+			for y := 2; y < deepTop; y++ {
+				if w.getLocal(x, y, z) == Air && blocks[w.getLocal(x, y-1, z)].Solid && w.getLocal(x, y-1, z) != Lava {
+					r := hash2(x, y*77+z, seed+16)
+					if r < 0.03 {
+						w.setLocal(x, y, z, Glowshroom)
+					}
+				}
+			}
+		}
+	}
+	// Ravines: long narrow chasms from the surface down into the deep.
+	for i := 0; i < 2*areaScale; i++ {
+		x, z := rand.Intn(worldW), rand.Intn(worldD)
+		if dx, dz := x+originX, z+originZ; dx*dx+dz*dz < 900 {
+			continue
+		}
+		ang := rand.Float64() * 2 * math.Pi
+		dx, dz := math.Cos(ang), math.Sin(ang)
+		length := 30 + rand.Intn(40)
+		floorY := deepTop - 6 - rand.Intn(10)
+		for k := 0; k < length; k++ {
+			cx, cz := x+int(float64(k)*dx), z+int(float64(k)*dz)
+			half := 1 + int(2*math.Sin(float64(k)/float64(length)*math.Pi)) // widest in the middle
+			top := heights[wrapZ(cz)*worldW+wrapX(cx)]
+			if top <= seaLevel+1 {
+				continue
+			}
+			for s := -half; s <= half; s++ {
+				ox, oz := cx+int(float64(s)*-dz), cz+int(float64(s)*dx)
+				for y := floorY; y < top+2; y++ {
+					if b := w.getLocal(ox, y, oz); b != Bedrock && b != Lava && b != Water {
+						w.setLocal(ox, y, oz, Air)
+					}
+				}
+			}
+			ang += (rand.Float64() - 0.5) * 0.15
+			dx, dz = math.Cos(ang), math.Sin(ang)
 		}
 	}
 	// Ore veins, deeper ores rarer.
@@ -746,7 +811,7 @@ func (w *World) generate(seed int) {
 			x, z := rand.Intn(worldW), rand.Intn(worldD)
 			y := minY + rand.Intn(maxY-minY+1)
 			for j := 0; j < size; j++ {
-				if w.getLocal(x, y, z) == Stone {
+				if b := w.getLocal(x, y, z); b == Stone || b == DeepStone {
 					w.setLocal(x, y, z, ore)
 				}
 				x += rand.Intn(3) - 1
@@ -755,10 +820,11 @@ func (w *World) generate(seed int) {
 			}
 		}
 	}
-	vein(CoalOre, 300*areaScale, 4, 42, 9)
-	vein(IronOre, 190*areaScale, 2, 28, 6)
-	vein(GoldOre, 70*areaScale, 2, 16, 5)
-	vein(DiamondOre, 40*areaScale, 1, 9, 4)
+	vein(CoalOre, 300*areaScale, 4, groundBase+42, 9)
+	vein(IronOre, 190*areaScale, 2, groundBase+28, 6)
+	vein(GoldOre, 70*areaScale, 2, deepTop+8, 5)
+	vein(DiamondOre, 40*areaScale, 1, deepTop-6, 4)
+	vein(Amethyst, 60*areaScale, 2, deepTop-4, 5)
 	// Trees, cacti and ground cover by biome.
 	for i := 0; i < 900*areaScale; i++ {
 		x, z := rand.Intn(worldW-4)+2, rand.Intn(worldD-4)+2
@@ -815,7 +881,7 @@ func (w *World) generate(seed int) {
 		if dx, dz := x+originX, z+originZ; dx*dx+dz*dz < 144 {
 			continue
 		}
-		y := 5 + rand.Intn(12)
+		y := 5 + rand.Intn(groundBase+12)
 		if heights[z*worldW+x] < y+8 {
 			continue
 		}
@@ -849,7 +915,7 @@ func (w *World) generate(seed int) {
 	// Abandoned mineshafts: long timbered corridors with a few crates.
 	for i := 0; i < 4*areaScale; i++ {
 		x, z := rand.Intn(worldW-40)+20, rand.Intn(worldD-40)+20
-		y := 8 + rand.Intn(10)
+		y := 8 + rand.Intn(groundBase+10)
 		if heights[z*worldW+x]-12 < y {
 			y = heights[z*worldW+x] - 12 // stay well under the surface
 		}

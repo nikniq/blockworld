@@ -24,6 +24,7 @@ var trades = []Trade{
 	{Give: GoldOre, GiveN: 1, Get: Torch, GetN: 12},
 	{Give: DiamondOre, GiveN: 1, Get: ArrowItem, GetN: 24},
 	{Give: WheatItem, GiveN: 6, Get: Seeds, GetN: 12},
+	{Give: Amethyst, GiveN: 3, Get: DiamondOre, GetN: 1},
 }
 
 func (t *Trade) can(p *Player) bool { return p.Inv[t.Give] >= t.GiveN }
