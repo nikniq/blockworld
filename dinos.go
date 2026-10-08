@@ -150,7 +150,7 @@ func (g *Game) dinoTick(a *Animal, dt float32) {
 // and compys on the outback.
 func (g *Game) spawnDinos(n int) {
 	w := g.World
-	for i := 0; i < n*8 && n > 0; i++ {
+	for i := 0; i < n*40 && n > 0; i++ {
 		p := w.RandomFreePoint(g.Player.Pos, 30)
 		lx, lz := wrapX(floorI(p.X)-originX), wrapZ(floorI(p.Z)-originZ)
 		switch w.Biome[lz*worldW+lx] {

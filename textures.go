@@ -63,6 +63,7 @@ const (
 	PatMeteor
 	PatFruit
 	PatBoat
+	PatFlag
 )
 
 const (
@@ -487,6 +488,14 @@ func texel(p texPattern, base rl.Color, info *blockInfo, x, y, seed int) rl.Colo
 				return mul(base, 0.6)
 			}
 			return mul(base, 0.85+0.3*hash2(x/3, y, seed))
+		}
+		return rl.NewColor(0, 0, 0, 0)
+	case PatFlag:
+		if x <= 1 {
+			return mul(rl.NewColor(120, 90, 50, 255), 0.85+0.3*n) // pole
+		}
+		if y >= 2 && y <= 9 && x <= 13 {
+			return mul(base, 0.85+0.3*n) // banner
 		}
 		return rl.NewColor(0, 0, 0, 0)
 	case PatTorch:

@@ -1098,6 +1098,7 @@ func TestSwampAndBronto(t *testing.T) {
 	if mud == 0 {
 		t.Fatal("swamp should have mud")
 	}
+	g.spawnDinos(6)
 	kinds := map[AnimalKind]int{}
 	for _, a := range g.Animals {
 		kinds[a.Kind]++
@@ -1218,5 +1219,77 @@ func TestRiding(t *testing.T) {
 	g.mount(boat)
 	if g.Mount != boat {
 		t.Fatal("boarding should mount the boat")
+	}
+}
+
+// Factions: Red and Blue villages with flags, neutral control points, captures and founding.
+func TestFactions(t *testing.T) {
+	rand.Seed(27)
+	g := &Game{Audio: &Audio{}, CraftHover: -1}
+	g.Reset()
+	c := g.flagCounts()
+	if c[FactionRed] != 1 || c[FactionBlue] != 1 || c[FactionNone] < 2 {
+		t.Fatalf("flags %v", c)
+	}
+	// Raids spawn soldiers that march toward a flag.
+	for i := range g.Villages {
+		g.Villages[i].RaidCD = 0
+	}
+	g.Sky.T = 0.3
+	g.raids(0.1)
+	soldiers := 0
+	for _, a := range g.Animals {
+		if a.Alive && a.Kind == AnimalVillager && a.Warband {
+			soldiers++
+			if a.Goal < 0 || a.Goal >= len(g.Flags) {
+				t.Fatal("soldier needs a goal flag")
+			}
+		}
+	}
+	if soldiers < 3 {
+		t.Fatalf("raids should field soldiers: %d", soldiers)
+	}
+	// Capturing a neutral flag by standing beside it.
+	var fi int = -1
+	for i, f := range g.Flags {
+		if f.Faction == FactionNone {
+			fi = i
+			break
+		}
+	}
+	p := g.Player
+	p.Pos = g.Flags[fi].Pos
+	for i := 0; i < 100; i++ {
+		g.captureTick(0.1)
+	}
+	if g.Flags[fi].Faction != FactionPlayer {
+		t.Fatal("standing by a neutral flag should capture it")
+	}
+	// Founding a village and growing it from a bed.
+	x, z := floorI(g.Spawn.X)+6, floorI(g.Spawn.Z)
+	y := g.World.SurfaceY(x, z)
+	before := len(g.Villages)
+	g.foundVillage(x, y, z)
+	if len(g.Villages) != before+1 || g.Villages[before].Faction != FactionPlayer {
+		t.Fatal("founding should add a player village")
+	}
+	g.World.Set(x+3, y, z, Bed)
+	g.Villages[before].GrowCD = 0
+	g.Sky.T = 0.3
+	settlers := 0
+	for _, a := range g.Animals {
+		if a.Alive && a.Kind == AnimalVillager && a.Faction == FactionPlayer {
+			settlers++
+		}
+	}
+	g.growVillages(0.1)
+	after := 0
+	for _, a := range g.Animals {
+		if a.Alive && a.Kind == AnimalVillager && a.Faction == FactionPlayer {
+			after++
+		}
+	}
+	if after != settlers+1 {
+		t.Fatalf("a free bed should attract a settler: %d -> %d", settlers, after)
 	}
 }

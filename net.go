@@ -73,6 +73,7 @@ type AnimalState struct {
 	Prof    Profession
 	Name    string
 	Walking bool
+	Faction int
 }
 
 type DropState struct {
@@ -97,6 +98,7 @@ type Snapshot struct {
 	Drops    []DropState
 	Primed   []Primed
 	Arrows   []Arrow
+	Flags    []Flag
 }
 
 type FxKind int
@@ -423,7 +425,7 @@ func (g *Game) makeSnapshot() *Snapshot {
 		s.Enemies = append(s.Enemies, EnemyState{e.ID, e.Kind, e.Pos, e.Heading, e.HP, e.MaxHP, e.Alive, e.DeathT, e.Fuse, e.Burning, e.HitFlash})
 	}
 	for _, a := range g.Animals {
-		s.Animals = append(s.Animals, AnimalState{a.ID, a.Kind, a.Pos, a.Heading, a.HP, a.Alive, a.DeathT, a.Phase, a.Prof, a.Name, a.Walking})
+		s.Animals = append(s.Animals, AnimalState{a.ID, a.Kind, a.Pos, a.Heading, a.HP, a.Alive, a.DeathT, a.Phase, a.Prof, a.Name, a.Walking, a.Faction})
 	}
 	for i := range g.Drops {
 		d := &g.Drops[i]
@@ -431,6 +433,7 @@ func (g *Game) makeSnapshot() *Snapshot {
 	}
 	s.Primed = g.Primed
 	s.Arrows = g.Arrows
+	s.Flags = g.Flags
 	return s
 }
 
@@ -801,7 +804,7 @@ func (g *Game) applySnapshot(s *Snapshot) {
 		}
 		a.Pos = WrapPos(a.Pos)
 		a.Heading, a.HP, a.Alive, a.DeathT, a.Phase = as.Heading, as.HP, as.Alive, as.DeathT, as.Phase
-		a.Prof, a.Name, a.Walking = as.Prof, as.Name, as.Walking
+		a.Prof, a.Name, a.Walking, a.Faction = as.Prof, as.Name, as.Walking, as.Faction
 		g.Animals = append(g.Animals, a)
 	}
 	g.Drops = g.Drops[:0]
@@ -810,6 +813,7 @@ func (g *Game) applySnapshot(s *Snapshot) {
 	}
 	g.Primed = s.Primed
 	g.Arrows = s.Arrows
+	g.Flags = s.Flags
 }
 
 // ---------- shared ----------

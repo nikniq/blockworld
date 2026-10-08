@@ -74,6 +74,16 @@ block textures and sound effects are generated at startup.
   creepers will not go near it. Right click it to make it sit and wait, or follow again; a fish heals it.
 - **Fishing**: craft a rod from planks and wool, click at water to cast, and click again when the
   float dips. Mostly fish (food), sometimes seeds or an old boot.
+- **War of the flags**: two of the villages are rivals, Redfort and Bluehaven, each with a flag in its
+  square. By day they send warbands of soldiers marching across the map to capture control-point flags
+  on the open land and to raid each other; guards defend, and soldiers fight anyone of another colour.
+  Stand beside any flag for eight seconds with no enemy guards near to capture it for yourself (250
+  points; a village's flag turns its villagers to your side). Capturing a faction's flag or killing its
+  people makes it your enemy. Hold every flag to rule the land.
+- **Your own village**: craft a Village Flag (wool, planks, gold ore) and plant it on open ground. A
+  settler arrives at once, and every bed you build nearby fills with another villager over time. Right
+  click your flag to rally your guards against the nearest enemy flag. The minimap and compass panel
+  show every flag and who holds it.
 - **Villages**: a few per world on flat grassland, each a ring of plank or cobblestone houses with doors,
   windows, beds and torches around a well. One villager lives in each house: farmers, guards and
   librarians, who wander by day, go home at night and run from the undead (guards draw their swords).

@@ -33,6 +33,7 @@ var recipes = []Recipe{
 	{Name: "Door", Out: DoorClosed, Count: 1, In: []Ingredient{{Planks, 4}}},
 	{Name: "Fishing Rod", Out: Rod, Count: 1, In: []Ingredient{{Planks, 3}, {Wool, 2}}},
 	{Name: "Boat", Out: Boat, Count: 1, In: []Ingredient{{Planks, 5}}},
+	{Name: "Village Flag", Out: FlagItem, Count: 1, In: []Ingredient{{Wool, 3}, {Planks, 2}, {GoldOre, 1}}},
 	{Name: "Iron Ore x3 (smelt meteorite)", Out: IronOre, Count: 3, In: []Ingredient{{Meteorite, 1}, {CoalOre, 1}}},
 	{Name: "Rifle ammo x30 (meteorite)", Ammo: 30, In: []Ingredient{{Meteorite, 2}}},
 	{Name: "Arrows x4", Out: ArrowItem, Count: 4, In: []Ingredient{{Planks, 1}, {Gravel, 1}}},

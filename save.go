@@ -10,7 +10,7 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-const saveVersion = 9
+const saveVersion = 10
 
 // SaveData is the persisted state of a run: the whole voxel volume, the
 // player, the clock and the animals. Hostiles and drops are not kept.
@@ -34,6 +34,10 @@ type SaveData struct {
 	Deaths    int
 	Won       bool
 	Lost      int
+	Flags     []Flag
+	Villages  []Village
+	WarRed    bool
+	WarBlue   bool
 	Hunger    float32
 	SkyT      float32
 	Day       int
@@ -58,6 +62,10 @@ type SavedAnimal struct {
 	Talks      int
 	Coat       int
 	Sitting    bool
+	Faction    int
+	Village    int
+	Warband    bool
+	Goal       int
 }
 
 func savePath() string {
@@ -109,11 +117,12 @@ func (g *Game) saveErr() error {
 		Pos: pl.Pos, Yaw: pl.Yaw, Pitch: pl.Pitch, HP: pl.HP, Ammo: pl.Ammo, Reserve: pl.Reserve,
 		Inv: pl.Inv[:], SwordTier: pl.SwordTier, PickTier: pl.PickTier, ArmorTier: pl.ArmorTier,
 		Spawn: g.Spawn, Deaths: g.Deaths, Hunger: pl.Hunger, Won: g.Won, Lost: g.VillagersLost,
+		Flags: g.Flags, Villages: g.Villages, WarRed: g.WarRed, WarBlue: g.WarBlue,
 		SkyT: g.Sky.T, Day: g.Sky.Day, Night: g.Night, Score: g.Score, Kills: g.Kills,
 	}
 	for _, a := range g.Animals {
 		if a.Alive {
-			d.Animals = append(d.Animals, SavedAnimal{a.Kind, a.Pos, a.HP, a.Home, a.Prof, a.Name, a.Quest, a.QuestDone, a.QuestKills, a.Tamed, a.QuestAccepted, a.TalkCount, a.Coat, a.Sitting})
+			d.Animals = append(d.Animals, SavedAnimal{a.Kind, a.Pos, a.HP, a.Home, a.Prof, a.Name, a.Quest, a.QuestDone, a.QuestKills, a.Tamed, a.QuestAccepted, a.TalkCount, a.Coat, a.Sitting, a.Faction, a.Village, a.Warband, a.Goal})
 		}
 	}
 	tmp := p + ".tmp"
@@ -169,6 +178,7 @@ func (g *Game) load() bool {
 	copy(pl.Inv[:], d.Inv)
 	pl.SwordTier, pl.PickTier, pl.ArmorTier = d.SwordTier, d.PickTier, d.ArmorTier
 	g.Spawn, g.Deaths, g.Won, g.VillagersLost = d.Spawn, d.Deaths, d.Won, d.Lost
+	g.Flags, g.Villages, g.WarRed, g.WarBlue = d.Flags, d.Villages, d.WarRed, d.WarBlue
 	pl.Hunger = d.Hunger
 	pl.EnsureHeld()
 	g.Sky.T, g.Sky.Day = d.SkyT, d.Day
@@ -183,6 +193,7 @@ func (g *Game) load() bool {
 		a.Tamed = sa.Tamed
 		a.QuestAccepted, a.TalkCount = sa.Accepted, sa.Talks
 		a.Coat, a.Sitting = sa.Coat, sa.Sitting
+		a.Faction, a.Village, a.Warband, a.Goal = sa.Faction, sa.Village, sa.Warband, sa.Goal
 		if a.Kind == AnimalVillager || a.Kind == AnimalWolf {
 			a.Walking = true
 		}

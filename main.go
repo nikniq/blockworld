@@ -106,6 +106,10 @@ type Game struct {
 	Disc           *Discovery
 	Talking        *Animal
 	Mount          *Animal
+	Flags          []Flag
+	Villages       []Village
+	WarRed         bool // the player has fought Red (captured a flag or killed a villager)
+	WarBlue        bool
 	loading        bool // Reset called from load(): keep the save's world size
 	joining        bool // Reset called from Connect(): keep the host's world size
 	Conv           *Conversation
@@ -201,6 +205,8 @@ func (g *Game) Reset() {
 	g.spawnAnimals(16)
 	g.spawnDinosaur()
 	g.spawnVillagers()
+	g.WarRed, g.WarBlue = false, false
+	g.setupFactions()
 	g.spawnWolves(4)
 	g.spawnCats(5)
 	g.spawnHorses(5)
@@ -797,6 +803,16 @@ func (g *Game) updateBuilder(dt float32) {
 	} else {
 		p.Mining = false
 	}
+	if usePressed() && w.Get(a.X, a.Y, a.Z) == FlagPost {
+		if f := g.flagAt(a.X, a.Y, a.Z); f != nil {
+			if f.Faction == FactionPlayer {
+				g.rally(f)
+			} else {
+				g.say(fmt.Sprintf("%s flag. Stand beside it for %d seconds with no enemy guards near to capture it.", factionNames[f.Faction], int(captureTime)), 3)
+			}
+		}
+		return
+	}
 	if usePressed() && w.Get(a.X, a.Y, a.Z) == FruitLeaves {
 		if g.isClient() {
 			g.sendToHost(&Msg{Place: &struct {
@@ -890,6 +906,39 @@ func (g *Game) breakBlock(x, y, z int) {
 	b := g.World.Get(x, y, z)
 	if b == Air {
 		return
+	}
+	if b == FlagPost {
+		f := g.flagAt(x, y, z)
+		if f == nil || f.Faction != FactionPlayer || f.Village < 0 {
+			g.say("You cannot tear this flag down. Capture it by standing beside it.", 2)
+			return
+		}
+		for i := range g.Flags {
+			if &g.Flags[i] == f {
+				vi := f.Village
+				g.Flags = append(g.Flags[:i], g.Flags[i+1:]...)
+				for j := range g.Flags {
+					if g.Flags[j].Village > vi {
+						g.Flags[j].Village--
+					}
+				}
+				g.Villages = append(g.Villages[:vi], g.Villages[vi+1:]...)
+				for _, an := range g.Animals {
+					if an.Village == vi {
+						an.Village, an.Faction = -1, FactionNone
+					} else if an.Village > vi {
+						an.Village--
+					}
+				}
+				for j := range g.Villages {
+					if g.Villages[j].Flag > i {
+						g.Villages[j].Flag--
+					}
+				}
+				break
+			}
+		}
+		g.say("Your village is disbanded", 2)
 	}
 	info := &blocks[b]
 	g.World.Set(x, y, z, Air)
@@ -1016,6 +1065,14 @@ func (g *Game) soak(frame int) bool {
 		g.trySleep()
 	}
 	if frame%1500 == 0 {
+		x, z := floorI(p.Pos.X)+5, floorI(p.Pos.Z)+5
+		if g.nearestVillage(rl.NewVector3(float32(x), 0, float32(z))) < 0 {
+			g.foundVillage(x, w.SurfaceY(x, z), z)
+		}
+		for i := range g.Villages {
+			g.Villages[i].RaidCD = 0
+		}
+		g.raids(0.1)
 		g.asteroidImpact(rl.Vector3Add(p.Pos, rl.NewVector3(12, 0, 0)))
 		g.World.RegrowTrees(0, 1)
 	}
@@ -1492,6 +1549,25 @@ func (g *Game) update(dt float32) {
 		if usePressed() && !p.Mounted {
 			g.placeBoat()
 		}
+	case ItemFlag:
+		p.Mining = false
+		p.Aim = g.World.RayCastAny(p.Eye(), p.Forward(), reachDist)
+		if usePressed() && p.Aim.Hit {
+			a := p.Aim
+			x, y, z := a.X+a.NX, a.Y+a.NY, a.Z+a.NZ
+			switch {
+			case g.isClient():
+				g.say("Only the host can found villages", 2)
+			case !blocks[g.World.Get(x, y-1, z)].Solid || g.World.Get(x, y, z) != Air:
+				g.say("Plant the flag on solid open ground", 1.5)
+			case g.nearestVillage(rl.NewVector3(float32(x), float32(y), float32(z))) >= 0:
+				g.say("Too close to another village", 1.5)
+			default:
+				p.Inv[FlagItem]--
+				p.EnsureHeld()
+				g.foundVillage(x, y, z)
+			}
+		}
 	case ItemBow:
 		p.Mining = false
 		p.Aim.Hit = false
@@ -1628,6 +1704,9 @@ func (g *Game) worldUpdate(dt float32) {
 	g.tickDeep(dt)
 	g.tickAsteroid(dt)
 	g.tickRegrow(dt)
+	g.captureTick(dt)
+	g.raids(dt)
+	g.growVillages(dt)
 	g.updateSleep(dt)
 }
 
@@ -1825,6 +1904,9 @@ func (g *Game) draw3D() {
 	g.drawBolt()
 	g.drawBobber()
 	g.drawAsteroid(cam)
+	w.BeginShader()
+	g.drawFlags(cam)
+	w.EndShader()
 	for _, s := range g.Sparks {
 		if s.Block != Air {
 			m := rl.MatrixMultiply(rl.MatrixMultiply(rl.MatrixScale(0.12, 0.12, 0.12), rl.MatrixRotateY(s.Spin)), rl.MatrixTranslate(s.Pos.X, s.Pos.Y, s.Pos.Z))
@@ -2254,7 +2336,7 @@ func (g *Game) drawHotbar(sw, sh int32) {
 				drawSwordIcon(cx, cy, slot*0.9, p.SwordTier)
 			case ItemPickaxe:
 				drawPickIcon(cx, cy, slot*0.9, p.PickTier)
-			case ItemBlock, ItemFood, ItemBow, ItemRod, ItemBoat:
+			case ItemBlock, ItemFood, ItemBow, ItemRod, ItemBoat, ItemFlag:
 				g.drawBlockIcon(it.Block, x+9, y0+9, slot-18)
 				if it.Kind == ItemBow {
 					cnt := fmt.Sprintf("%d", p.Inv[ArrowItem])
@@ -2296,6 +2378,8 @@ func (g *Game) drawHotbar(sw, sh int32) {
 		name = "Fishing Rod  (click at water to cast, click again when it bites)"
 	case ItemBoat:
 		name = "Boat  (right click at water to launch)"
+	case ItemFlag:
+		name = "Village Flag  (right click on open ground to found your village)"
 	}
 	if len(hb) > hotbarSlots {
 		name += "   (wheel scrolls)"
@@ -2597,6 +2681,7 @@ func (g *Game) drawHelp(sw, sh int32) {
 		"Horses (plains): feed wheat, bread or apples twice, then right click to ride; SPACE jumps, CTRL gallops, SHIFT dismounts. Boat: 5 planks.",
 		"Outback: red sand, eucalyptus, kangaroos, emus, wombats. Koalas and platypuses are protected. Mind the crocodiles.",
 		"The deep: below the dark stone lie vast caverns, lakes, ravines, glowshrooms, amethyst, diamonds and cave spiders.",
+		"War: Redfort and Bluehaven send warbands to capture flags. Stand by a flag 8s to capture it. Craft a Village Flag to found your own.",
 		"Dinosaurs: brontosaur herds browse the swamp willows, raptor packs and compys roam the outback, the tyrannosaur hunts alone.",
 		"Asteroids fall now and then: heed the warning and its bearing. Mine the meteorite. Trees regrow leaves; pick apples off red-dotted leaves.",
 		"H closes this help",
@@ -2694,6 +2779,11 @@ func (g *Game) drawMinimap(sw int32) {
 	label := fmt.Sprintf("Facing %s  (%d, %d, %d)", dirs[int((deg+22.5)/45)%8], floorI(wp.X), floorI(wp.Y), floorI(wp.Z))
 	rl.DrawRectangle(mx, my+size+4, size, 22, rl.NewColor(0, 0, 0, 140))
 	rl.DrawText(label, mx+6, my+size+8, 14, rl.LightGray)
+	if len(g.Flags) > 0 {
+		c := g.flagCounts()
+		rl.DrawRectangle(mx, my+size+52, size, 20, rl.NewColor(0, 0, 0, 140))
+		rl.DrawText(fmt.Sprintf("Flags  You %d  Red %d  Blue %d  Free %d", c[FactionPlayer], c[FactionRed], c[FactionBlue], c[FactionNone]), mx+6, my+size+55, 14, rl.LightGray)
+	}
 	if hint := g.beaconHint(); hint != "" {
 		rl.DrawRectangle(mx, my+size+28, size, 20, rl.NewColor(0, 0, 0, 140))
 		c := rl.NewColor(120, 220, 255, 255)
@@ -2705,6 +2795,11 @@ func (g *Game) drawMinimap(sw int32) {
 	if b := g.World.Beacon; b.Y > 0 {
 		bx, by := toMap(b.X, b.Z)
 		rl.DrawRectanglePro(rl.NewRectangle(bx, by, 8, 8), rl.NewVector2(4, 4), 45, rl.NewColor(120, 220, 255, 255))
+	}
+	for _, f := range g.Flags {
+		fx, fy := toMap(f.Pos.X, f.Pos.Z)
+		rl.DrawRectangle(int32(fx)-2, int32(fy)-4, 2, 7, rl.White)
+		rl.DrawRectangle(int32(fx), int32(fy)-4, 5, 3, factionColors[f.Faction])
 	}
 }
 

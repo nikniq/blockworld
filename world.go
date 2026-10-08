@@ -92,6 +92,8 @@ const (
 	Fish
 	Rod
 	Boat
+	FlagPost
+	FlagItem
 	DeepStone
 	Mud
 	Meteorite
@@ -145,6 +147,7 @@ var (
 	ladderBox     = [2][3]float32{{0.25, 0, 0.25}, {0.75, 1, 0.75}}
 	plantBox      = [2][3]float32{{0.15, 0, 0.15}, {0.85, 0.85, 0.85}}
 	cropBox       = [2][3]float32{{0.15, 0, 0.15}, {0.85, 0.3, 0.85}}
+	flagBox       = [2][3]float32{{0.44, 0, 0.44}, {0.56, 3, 0.56}}
 	doorClosedBox = [2][3]float32{{0, 0, 0.4}, {1, 1, 0.6}}
 	doorOpenBox   = [2][3]float32{{0, 0, 0}, {0.2, 1, 1}}
 )
@@ -292,6 +295,10 @@ var blocks = [numBlocks]blockInfo{
 		Pat: [3]texPattern{PatFruit, PatFruit, PatFruit}, MineTime: 0.3, Drops: Leaves, Solid: true},
 	Boat: {Name: "Boat", Top: col(150, 110, 65), Side: col(150, 110, 65), Bottom: col(150, 110, 65),
 		Pat: [3]texPattern{PatBoat, PatBoat, PatBoat}, MineTime: 0.1, Drops: Boat, Item: true},
+	FlagPost: {Name: "Flag", Top: col(120, 90, 50), Side: col(120, 90, 50), Bottom: col(120, 90, 50),
+		Pat: [3]texPattern{PatNoise, PatLogSide, PatNoise}, MineTime: 1.5, Drops: FlagItem, Tiny: true, Box: &flagBox, Emit: 5},
+	FlagItem: {Name: "Village Flag", Top: col(240, 200, 50), Side: col(240, 200, 50), Bottom: col(240, 200, 50),
+		Pat: [3]texPattern{PatFlag, PatFlag, PatFlag}, MineTime: 0.1, Drops: FlagItem, Item: true},
 	DeepStone: {Name: "Deep Stone", Top: col(70, 72, 80), Side: col(66, 68, 76), Bottom: col(60, 62, 70),
 		Pat: [3]texPattern{PatNoise, PatNoise, PatNoise}, MineTime: 4.5, Hard: true, Drops: Cobble, Solid: true},
 	Glowshroom: {Name: "Glowshroom", Top: col(120, 200, 230), Side: col(120, 200, 230), Bottom: col(120, 200, 230),
@@ -366,20 +373,21 @@ type Env struct {
 
 // World holds the voxel volume, per-column heights and chunk meshes.
 type World struct {
-	Blocks    []Block
-	Height    []int      // per column (z*worldW+x): top of the column (highest non-air, including water) + 1
-	Ground    []int      // per column: feet level on the highest solid block
-	Light     []uint8    // per cell: sunlight in the high nibble, block light in the low nibble
-	Version   int        // bumped on every block change; the nav grid watches it
-	Seed      int        // generation seed; biomes are derived from it
-	Beacon    rl.Vector3 // the objective's position
-	BeaconLit bool
-	Biome     []Biome                    // per column
-	OnSet     func(x, y, z int, b Block) // called after every Set (multiplayer broadcast)
-	relight   map[int]bool               // chunks whose lighting must be recomputed
-	chunks    []*chunk
-	ncx       int
-	ncz       int
+	Blocks         []Block
+	Height         []int        // per column (z*worldW+x): top of the column (highest non-air, including water) + 1
+	Ground         []int        // per column: feet level on the highest solid block
+	Light          []uint8      // per cell: sunlight in the high nibble, block light in the low nibble
+	Version        int          // bumped on every block change; the nav grid watches it
+	Seed           int          // generation seed; biomes are derived from it
+	Beacon         rl.Vector3   // the objective's position
+	VillageCentres []rl.Vector3 // squares of generated villages (world coordinates)
+	BeaconLit      bool
+	Biome          []Biome                    // per column
+	OnSet          func(x, y, z int, b Block) // called after every Set (multiplayer broadcast)
+	relight        map[int]bool               // chunks whose lighting must be recomputed
+	chunks         []*chunk
+	ncx            int
+	ncz            int
 
 	gpu       bool // GPU resources created
 	tex       rl.Texture2D

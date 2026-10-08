@@ -89,6 +89,10 @@ type Animal struct {
 	QuestDone     bool
 	QuestKills    int // kills when a kill quest was accepted (-1: not yet)
 	QuestAccepted bool
+	Faction       int
+	Village       int // index into g.Villages (-1: none)
+	Warband       bool
+	Goal          int // flag index a soldier marches on
 	TalkCount     int
 	Bubble        string  // ambient line shown over the head
 	BubbleT       float32 // seconds the bubble stays
@@ -108,7 +112,7 @@ type Animal struct {
 func NewAnimal(pos rl.Vector3, kind AnimalKind) *Animal {
 	s := &animalKinds[kind]
 	a := rand.Float64() * 2 * math.Pi
-	return &Animal{Kind: kind, Spec: s, Pos: pos, HP: s.HP, Alive: true, Lum: 1, QuestKills: -1,
+	return &Animal{Kind: kind, Spec: s, Pos: pos, HP: s.HP, Alive: true, Lum: 1, QuestKills: -1, Village: -1, Goal: -1,
 		Heading: rl.NewVector3(float32(math.Sin(a)), 0, float32(math.Cos(a)))}
 }
 
@@ -291,6 +295,15 @@ func (a *Animal) Draw(w *World) {
 			skin = SkinLibrarian
 		}
 		skins.DrawHumanoid(w, skin, &pose)
+		if a.Alive && a.Faction != FactionNone {
+			// Faction sash across the chest.
+			fwd := a.Heading
+			if rl.Vector3Length(fwd) < 0.01 {
+				fwd = rl.NewVector3(0, 0, 1)
+			}
+			c := rl.Vector3Add(rl.NewVector3(a.Pos.X, a.Pos.Y+1.15, a.Pos.Z), rl.Vector3Scale(fwd, 0.14))
+			rl.DrawCubeV(c, rl.NewVector3(0.5, 0.14, 0.06), mul(factionColors[a.Faction], a.Lum))
+		}
 		if a.Alive && a.HP < a.Spec.HP {
 			top := a.Pos.Y + a.Spec.Height + 0.2
 			frac := float32(a.HP) / float32(a.Spec.HP)
@@ -1015,6 +1028,15 @@ func (g *Game) killAnimal(a *Animal) {
 			g.dismount()
 		}
 	case AnimalVillager:
+		if a.Faction == FactionRed {
+			g.WarRed = true
+		}
+		if a.Faction == FactionBlue {
+			g.WarBlue = true
+		}
+		if a.Faction == FactionPlayer {
+			g.say("One of your own settlers!", 3)
+		}
 		g.Score -= 200
 		g.VillagerGrudge = 240 // seconds the village stays angry with you
 		g.VillagersLost++

@@ -44,6 +44,7 @@ func (w *World) placeVillages(heights []int) {
 }
 
 func (w *World) buildVillage(cx, cz, base int) {
+	w.VillageCentres = append(w.VillageCentres, rl.NewVector3(float32(cx+originX)+0.5, float32(base), float32(cz+originZ)+0.5))
 	// Well in the middle.
 	for dz := -1; dz <= 1; dz++ {
 		for dx := -1; dx <= 1; dx++ {
@@ -206,6 +207,7 @@ func (g *Game) spawnVillagers() {
 		home := rl.NewVector3(float32(x)+0.5, float32(y), float32(z)+0.5)
 		v := NewAnimal(home, AnimalVillager)
 		v.Home = home
+		v.Village = -1
 		v.Prof = Profession(rand.Intn(int(numProfessions)))
 		v.Name = villagerNames[rand.Intn(len(villagerNames))]
 		v.Quest = rand.Intn(len(quests))
@@ -218,6 +220,32 @@ func (g *Game) spawnVillagers() {
 // night, run from hostiles, and (guards) strike hostiles that come close.
 func (g *Game) villagerTick(a *Animal, dt float32) {
 	w := g.World
+	if a.Warband {
+		g.warTick(a, dt)
+		return
+	}
+	if a.Prof == ProfGuard && a.Faction != FactionNone {
+		// Home guards fight raiders of another faction that come near.
+		if foe := g.nearestFoe(a, 8); foe != nil {
+			a.BiteCD = max(0, a.BiteCD-dt)
+			to := WrapDelta(foe.Pos, a.Pos)
+			to.Y = 0
+			d := rl.Vector3Length(to)
+			if d > 0.01 {
+				a.Heading = rl.Vector3Scale(to, 1/d)
+			}
+			a.Walking = d > 1.8
+			a.WanderT = 0.4
+			if d < 2.2 && a.BiteCD == 0 {
+				a.BiteCD = 1.2
+				g.burst(rl.Vector3Add(foe.Pos, rl.NewVector3(0, 1, 0)), rl.NewColor(255, 90, 90, 255), 6)
+				if foe.Hit(3) {
+					g.announce(foe.Name+" fell in battle", 2.5)
+				}
+			}
+			return
+		}
+	}
 	// Nearest hostile.
 	var threat *Enemy
 	td := float32(99)
@@ -452,6 +480,17 @@ func (g *Game) gossip(a *Animal) string {
 	}
 	if g.VillagersLost > 0 {
 		lines = append(lines, fmt.Sprintf("We buried %d since the dead started walking. Do not add to the count.", g.VillagersLost))
+	}
+	if a.Faction == FactionRed || a.Faction == FactionBlue {
+		other := FactionBlue
+		if a.Faction == FactionBlue {
+			other = FactionRed
+		}
+		c := g.flagCounts()
+		lines = append(lines, fmt.Sprintf("The %ss hold %d flags to our %d. Our warbands will see to that.", factionNames[other], c[other], c[a.Faction]))
+	}
+	if a.Faction == FactionPlayer {
+		lines = append(lines, "Proud to live under your flag. Build us more houses and more will come.")
 	}
 	if g.traderAlive() {
 		lines = append(lines, "That trader in the purple robe is back. His prices are robbery, but he has things we cannot make.")
