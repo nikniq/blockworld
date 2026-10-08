@@ -9,3 +9,5 @@ arena-strike.exe
 *.app
 shot_*.png
 fpsgame1
+dist/
+*.syso

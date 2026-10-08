@@ -3,7 +3,9 @@
 
 BIN := blockworld
 
-.PHONY: run build build-macos build-linux build-windows clean
+.PHONY: run build build-macos build-linux build-windows clean app-macos app-linux app-windows
+
+include packaging.mk
 
 run:
 	go run .
@@ -21,4 +23,4 @@ build-windows:
 	go build -ldflags="-s -w -H windowsgui" -o $(BIN).exe .
 
 clean:
-	rm -f $(BIN) $(BIN)-macos $(BIN)-linux $(BIN).exe
+	rm -rf $(BIN) $(BIN)-macos $(BIN)-linux $(BIN).exe dist *.syso

@@ -189,6 +189,21 @@ go build -ldflags="-H windowsgui" -o blockworld.exe .
 ```
 
 A `Makefile` with `run`, `build`, `build-macos`, `build-linux` and `build-windows` targets is included.
+
+### Packaging as an app with an icon
+
+The icon is generated from code (`go run ./cmd/mkicon` writes `icon.png`) and embedded in the binary,
+so the window shows it on Linux and Windows. To make a proper application:
+
+| Platform | Command | Result |
+|---|---|---|
+| macOS | `make app-macos` | `dist/Blockworld.app` with an `.icns` icon; drag it to Applications |
+| Linux | `make app-linux` | installs to `~/.local/bin` with a desktop launcher and icon in your app menu |
+| Windows | `make app-windows` | `blockworld.exe` with the icon embedded (needs `go install github.com/tc-hib/go-winres@latest`) |
+
+The macOS bundle is unsigned, so the first launch needs right click, Open (or
+`xattr -dr com.apple.quarantine dist/Blockworld.app`). Signing and notarising with a Developer ID
+is the extra step for distributing outside your own machines.
 Because raylib is built through cgo, each binary must be compiled on its own platform
 (or with a matching cross toolchain such as `x86_64-w64-mingw32-gcc` and `CGO_ENABLED=1 GOOS=windows CC=x86_64-w64-mingw32-gcc`).
 

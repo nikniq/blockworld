@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"flag"
 	"fmt"
 	"image"
@@ -15,6 +16,9 @@ import (
 )
 
 var settings = defaultSettings()
+
+//go:embed icon.png
+var iconPNG []byte
 
 type State int
 
@@ -2868,6 +2872,13 @@ func main() {
 		os.Exit(1)
 	}
 	defer rl.CloseWindow()
+	if icon := rl.LoadImageFromMemory(".png", iconPNG, int32(len(iconPNG))); icon != nil && icon.Width > 0 {
+		small := rl.ImageCopy(icon)
+		rl.ImageResize(small, 256, 256)
+		rl.SetWindowIcon(*small)
+		rl.UnloadImage(small)
+		rl.UnloadImage(icon)
+	}
 	rl.SetTargetFPS(144)
 	rl.SetExitKey(rl.KeyNull)
 	settings = loadSettings()
