@@ -192,6 +192,17 @@ A `Makefile` with `run`, `build`, `build-macos`, `build-linux` and `build-window
 
 ### Packaging as an app with an icon
 
+The quickest way is the packaging script, which checks the toolchain, generates the icon, runs the
+tests, builds, packages for the platform it runs on and writes checksums into `dist/`:
+
+```sh
+./cx.sh                  # dist/Blockworld.app + zip on macOS, tar.gz with installer on Linux, zip on Windows
+./cx.sh --version 1.2    # stamp a version into the package names and the menu
+./cx.sh --run            # launch the packaged game afterwards
+```
+
+On Windows run it from a Git Bash or MSYS2 shell. The pieces it uses are also available as make targets:
+
 The icon is generated from code (`go run ./cmd/mkicon` writes `icon.png`) and embedded in the binary,
 so the window shows it on Linux and Windows. To make a proper application:
 

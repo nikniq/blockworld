@@ -18,6 +18,9 @@ import (
 
 var settings = defaultSettings()
 
+// gameVersion is stamped by cx.sh (-X main.gameVersion=...).
+var gameVersion = "dev"
+
 //go:embed icon.png
 var iconPNG []byte
 
@@ -2329,6 +2332,7 @@ func (g *Game) drawOverlay() {
 	switch g.State {
 	case StateMenu:
 		centered("BLOCKWORLD", sh/2-200, 72, rl.Gold)
+		rl.DrawText("v"+gameVersion, sw-20-rl.MeasureText("v"+gameVersion, 16), sh-24, 16, rl.Gray)
 		centered("Mine by day. Survive the night.", sh/2-120, 24, rl.LightGray)
 		centered("WASD move   MOUSE or ARROW KEYS look   CTRL sprint   SHIFT sneak   SPACE jump / swim", sh/2-60, 19, rl.White)
 		centered("1-9 / WHEEL pick hotbar item      LEFT CLICK mine, swing or shoot      RIGHT CLICK place", sh/2-32, 19, rl.White)
