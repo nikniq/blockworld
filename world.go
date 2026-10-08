@@ -133,6 +133,23 @@ const (
 	BiomeOutback
 )
 
+// ladderBox leans a ladder against the first solid wall beside it: a thin
+// panel, not a block. Without a wall it stands as a thin panel across the cell.
+func (w *World) ladderBox(lx, y, lz int) [2][3]float32 {
+	const t = 0.12
+	switch {
+	case w.getLocal(lx, y, lz-1).Opaque():
+		return [2][3]float32{{0.05, 0, 0.02}, {0.95, 1, 0.02 + t}}
+	case w.getLocal(lx, y, lz+1).Opaque():
+		return [2][3]float32{{0.05, 0, 0.98 - t}, {0.95, 1, 0.98}}
+	case w.getLocal(lx-1, y, lz).Opaque():
+		return [2][3]float32{{0.02, 0, 0.05}, {0.02 + t, 1, 0.95}}
+	case w.getLocal(lx+1, y, lz).Opaque():
+		return [2][3]float32{{0.98 - t, 0, 0.05}, {0.98, 1, 0.95}}
+	}
+	return [2][3]float32{{0.05, 0, 0.44}, {0.95, 1, 0.56}}
+}
+
 // TinyBox returns the extents of a Tiny block.
 func (b Block) TinyBox() [2][3]float32 {
 	if bx := blocks[b].Box; bx != nil {
@@ -1399,6 +1416,9 @@ func (w *World) buildChunk(ci, cj int, c *chunk) {
 					// Small box lit by its own cell, no culling or occlusion.
 					l := cornerLight{float32(w.sunLocal(lx, y, lz)) / 15, float32(w.blockLocal(lx, y, lz)) / 15}
 					box := b.TinyBox()
+					if b == Ladder {
+						box = w.ladderBox(lx, y, lz)
+					}
 					if info.Cross {
 						c.opaque.emitCross(b, wx, float32(y), wz, box[1][1], l, biomeTintCode(b, &faces[0], w.Biome[lz*worldW+lx]))
 						continue

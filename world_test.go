@@ -418,6 +418,13 @@ func TestLavaSaplingLadder(t *testing.T) {
 	if w.Solid(20, 20, 20) || !blocks[Ladder].Tiny {
 		t.Fatal("ladders are climbable tiny blocks, not walls")
 	}
+	// A ladder leans against the wall beside it as a thin panel.
+	w.Set(20, 20, 21, Stone)
+	lx, lz := wrapX(20-originX), wrapZ(20-originZ)
+	bx := w.ladderBox(lx, 20, lz)
+	if bx[1][2]-bx[0][2] > 0.2 || bx[0][2] < 0.8 {
+		t.Fatalf("ladder should hug the +Z wall: %v", bx)
+	}
 	if h := w.RayCastAny(rl.NewVector3(20.5, 20.5, 10.5), rl.NewVector3(0, 0, 1), 20); !h.Hit || h.Z != 20 {
 		t.Fatalf("ladder should be aimable: %+v", h)
 	}

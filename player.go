@@ -63,6 +63,7 @@ type Player struct {
 	InWater   bool // feet in water or lava
 	InLava    bool
 	OnLadder  bool
+	wasLadder bool
 	HeadWater bool // eyes in water
 	LavaT     float32
 	CactusT   float32
@@ -435,6 +436,7 @@ func (p *Player) Update(dt float32, w *World) {
 		p.Pos, res = w.MoveBox(p.Pos, playerHalfW, playerHeight, delta, false)
 	}
 	p.Pos = WrapPos(p.Pos)
+	p.wasLadder = p.OnLadder
 	if res.Ground || res.Ceiling {
 		p.VelY = 0
 	}

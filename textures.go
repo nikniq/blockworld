@@ -293,10 +293,10 @@ func texel(p texPattern, base rl.Color, info *blockInfo, x, y, seed int) rl.Colo
 		}
 		return mul(base, 0.5)
 	case PatLadder:
-		if x < 3 || x > 12 || y%4 == 1 {
-			return mul(base, 0.85+0.3*n) // rails and rungs
+		if x < 3 || x > 12 || y%4 == 1 || y%4 == 2 {
+			return mul(base, 0.85+0.3*n) // rails and rungs; the rest is open air
 		}
-		return mul(base, 0.35)
+		return rl.NewColor(0, 0, 0, 0)
 	case PatBirchSide:
 		if hash2(x/2, y/3, seed) < 0.18 {
 			return mul(rl.NewColor(40, 40, 40, 255), 0.8+0.4*n) // bark marks

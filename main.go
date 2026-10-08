@@ -825,6 +825,10 @@ func (g *Game) updateBuilder(dt float32) {
 			below := w.Get(x, y-1, z)
 			free = free && (below == Grass || below == Dirt)
 		}
+		if p.Held.Block == Ladder {
+			// Ladders hang on a wall.
+			free = free && (w.Get(x+1, y, z).Opaque() || w.Get(x-1, y, z).Opaque() || w.Get(x, y, z+1).Opaque() || w.Get(x, y, z-1).Opaque())
+		}
 		if w.InBounds(x, y, z) && free && !(held.Solid && g.blockOccupied(x, y, z)) {
 			if g.isClient() {
 				g.sendToHost(&Msg{Place: &struct {
