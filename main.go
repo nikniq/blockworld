@@ -105,6 +105,7 @@ type Game struct {
 	JoinField      int // 0 address, 1 name
 	Disc           *Discovery
 	Talking        *Animal
+	Mount          *Animal
 	Conv           *Conversation
 	VillagerGrudge float32 // seconds left of the village being angry at the player
 	VillagersLost  int
@@ -195,6 +196,8 @@ func (g *Game) Reset() {
 	g.spawnVillagers()
 	g.spawnWolves(4)
 	g.spawnCats(5)
+	g.spawnHorses(5)
+	g.Mount = nil
 	g.spawnWildlife(12)
 	g.spawnWaterLife(6)
 	g.spawnDinos(4)
@@ -1417,10 +1420,10 @@ func (g *Game) update(dt float32) {
 	if p.InWater && !wasWater {
 		g.Audio.Play(g.Audio.Splash, 0.6)
 	}
-	if usePressed() && g.State == StatePlaying {
+	if usePressed() && g.State == StatePlaying && !p.Mounted {
 		ray := rl.NewRay(p.Eye(), p.Forward())
 		for _, an := range g.Animals {
-			if !an.Alive || (an.Kind != AnimalTrader && an.Kind != AnimalVillager && an.Kind != AnimalWolf && an.Kind != AnimalCat) {
+			if !an.Alive || (an.Kind != AnimalTrader && an.Kind != AnimalVillager && an.Kind != AnimalWolf && an.Kind != AnimalCat && an.Kind != AnimalHorse && an.Kind != AnimalBoat) {
 				continue
 			}
 			bb := an.BB()
@@ -1434,6 +1437,14 @@ func (g *Game) update(dt float32) {
 				}
 				if an.Kind == AnimalCat {
 					g.tameCat(an)
+					return
+				}
+				if an.Kind == AnimalHorse {
+					g.tameHorse(an)
+					return
+				}
+				if an.Kind == AnimalBoat {
+					g.mount(an)
 					return
 				}
 				if an.Kind == AnimalTrader {
@@ -1468,6 +1479,12 @@ func (g *Game) update(dt float32) {
 		p.Mining = false
 		p.Aim.Hit = false
 		g.updateFishing(dt)
+	case ItemBoat:
+		p.Mining = false
+		p.Aim.Hit = false
+		if usePressed() && !p.Mounted {
+			g.placeBoat()
+		}
 	case ItemBow:
 		p.Mining = false
 		p.Aim.Hit = false
@@ -1593,6 +1610,7 @@ func (g *Game) worldUpdate(dt float32) {
 	}
 	g.Enemies = live
 
+	g.tickMount(dt)
 	g.updateAnimals(dt)
 	g.updateArrows(dt)
 	g.updatePrimed(dt)
@@ -2229,7 +2247,7 @@ func (g *Game) drawHotbar(sw, sh int32) {
 				drawSwordIcon(cx, cy, slot*0.9, p.SwordTier)
 			case ItemPickaxe:
 				drawPickIcon(cx, cy, slot*0.9, p.PickTier)
-			case ItemBlock, ItemFood, ItemBow, ItemRod:
+			case ItemBlock, ItemFood, ItemBow, ItemRod, ItemBoat:
 				g.drawBlockIcon(it.Block, x+9, y0+9, slot-18)
 				if it.Kind == ItemBow {
 					cnt := fmt.Sprintf("%d", p.Inv[ArrowItem])
@@ -2269,6 +2287,8 @@ func (g *Game) drawHotbar(sw, sh int32) {
 		name = fmt.Sprintf("Bow  (%d arrows)", p.Inv[ArrowItem])
 	case ItemRod:
 		name = "Fishing Rod  (click at water to cast, click again when it bites)"
+	case ItemBoat:
+		name = "Boat  (right click at water to launch)"
 	}
 	if len(hb) > hotbarSlots {
 		name += "   (wheel scrolls)"
@@ -2364,6 +2384,9 @@ func (g *Game) drawHUD() {
 	rl.DrawText(fmt.Sprintf("%d", int(p.Hunger+0.5)), hx+10*22+12, fy+2, 16, rl.White)
 	if p.Sneak {
 		rl.DrawText("SNEAKING", hx, hy-62, 16, rl.LightGray)
+	}
+	if p.Mounted && g.Mount != nil {
+		rl.DrawText("RIDING  "+animalKinds[g.Mount.Kind].Name+"   SHIFT dismounts", hx, hy-62, 16, rl.SkyBlue)
 	}
 	if settings.Creative {
 		label := "CREATIVE"
@@ -2564,6 +2587,7 @@ func (g *Game) drawHelp(sw, sh int32) {
 		"Villages: right click a villager (?) for a quest. Guards fight the undead; keep the others safe.",
 		"Goal: find the ancient beacon tower (see the compass) and light it with 3 diamond ore.",
 		"Wolves: feed one meat or fish twice to tame it. Cats: a fish tames one; right click to sit or follow. Fishing rod: planks and wool.",
+		"Horses (plains): feed wheat, bread or apples twice, then right click to ride; SPACE jumps, CTRL gallops, SHIFT dismounts. Boat: 5 planks.",
 		"Outback: red sand, eucalyptus, kangaroos, emus, wombats. Koalas and platypuses are protected. Mind the crocodiles.",
 		"The deep: below the dark stone lie vast caverns, lakes, ravines, glowshrooms, amethyst, diamonds and cave spiders.",
 		"Dinosaurs: brontosaur herds browse the swamp willows, raptor packs and compys roam the outback, the tyrannosaur hunts alone.",
@@ -3253,7 +3277,10 @@ func (g *Game) scriptedShots(frame int) bool {
 		c.Tamed, c.Sitting, c.Coat = true, true, 1
 		wf := mk(AnimalWolf, 2.4, -1.3)
 		wf.Tamed = true
+		h := mk(AnimalHorse, 4.5, 2.6)
+		h.Tamed = true
 	case 234:
+		g.Player.DmgFlash = 0
 		rl.TakeScreenshot("shot_closeup.png")
 	case 235:
 		g.Asteroid = Asteroid{Target: rl.Vector3Add(g.Player.Pos, rl.NewVector3(20, 0, -20)), T: 6, Active: true}

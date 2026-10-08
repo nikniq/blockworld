@@ -10,7 +10,7 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-const saveVersion = 7
+const saveVersion = 8
 
 // SaveData is the persisted state of a run: the whole voxel volume, the
 // player, the clock and the animals. Hostiles and drops are not kept.

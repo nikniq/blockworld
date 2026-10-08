@@ -73,6 +73,7 @@ const (
 	BeaconLit
 	Fish
 	Rod
+	Boat
 	DeepStone
 	Mud
 	Meteorite
@@ -271,6 +272,8 @@ var blocks = [numBlocks]blockInfo{
 		Pat: [3]texPattern{PatMeteor, PatMeteor, PatMeteor}, MineTime: 4, Hard: true, MinTier: TierStone, Drops: Meteorite, Solid: true, Emit: 4},
 	FruitLeaves: {Name: "Apple Tree Leaves", Top: col(58, 132, 48), Side: col(54, 124, 46), Bottom: col(48, 110, 42),
 		Pat: [3]texPattern{PatFruit, PatFruit, PatFruit}, MineTime: 0.3, Drops: Leaves, Solid: true},
+	Boat: {Name: "Boat", Top: col(150, 110, 65), Side: col(150, 110, 65), Bottom: col(150, 110, 65),
+		Pat: [3]texPattern{PatBoat, PatBoat, PatBoat}, MineTime: 0.1, Drops: Boat, Item: true},
 	DeepStone: {Name: "Deep Stone", Top: col(70, 72, 80), Side: col(66, 68, 76), Bottom: col(60, 62, 70),
 		Pat: [3]texPattern{PatNoise, PatNoise, PatNoise}, MineTime: 4.5, Hard: true, Drops: Cobble, Solid: true},
 	Glowshroom: {Name: "Glowshroom", Top: col(120, 200, 230), Side: col(120, 200, 230), Bottom: col(120, 200, 230),

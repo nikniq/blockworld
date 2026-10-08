@@ -62,6 +62,7 @@ const (
 	PatAmethyst
 	PatMeteor
 	PatFruit
+	PatBoat
 )
 
 const (
@@ -478,6 +479,16 @@ func texel(p texPattern, base rl.Color, info *blockInfo, x, y, seed int) rl.Colo
 			v = 0.3
 		}
 		return mul(base, v)
+	case PatBoat:
+		// A hull seen from the side: curved bottom, flat top.
+		dx := float32(x) - 7.5
+		if y >= 6 && float32(y) < 10+float32(math.Sqrt(float64(36-dx*dx*0.9))) {
+			if y == 6 || y == 7 {
+				return mul(base, 0.6)
+			}
+			return mul(base, 0.85+0.3*hash2(x/3, y, seed))
+		}
+		return rl.NewColor(0, 0, 0, 0)
 	case PatTorch:
 		if y < 6 {
 			return mul(blocks[Torch].Top, 0.85+0.3*n)

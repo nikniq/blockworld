@@ -20,6 +20,8 @@ const (
 	AnimalVillager
 	AnimalWolf
 	AnimalCat
+	AnimalHorse
+	AnimalBoat
 	AnimalKangaroo
 	AnimalEmu
 	AnimalKoala
@@ -220,6 +222,11 @@ func (a *Animal) Draw(w *World) {
 		kind, scale = SkinWolf, 0.8
 	case AnimalCat:
 		kind, scale = SkinCat+SkinKind(a.Coat), 0.55
+	case AnimalHorse:
+		kind, scale = SkinHorse+SkinKind(a.Coat), 1.25
+	case AnimalBoat:
+		a.drawBoat()
+		return
 	case AnimalKoala:
 		kind, scale = SkinKoala, 0.55
 	case AnimalWombat:
@@ -424,6 +431,197 @@ func (g *Game) spawnWolves(n int) {
 		g.Animals = append(g.Animals, wf)
 		n--
 	}
+}
+
+// drawBoat: a wooden hull that bobs on the water.
+func (a *Animal) drawBoat() {
+	fwd := a.Heading
+	if rl.Vector3Length(fwd) < 0.01 {
+		fwd = rl.NewVector3(0, 0, 1)
+	}
+	side := rl.NewVector3(-fwd.Z, 0, fwd.X)
+	bob := float32(math.Sin(float64(rl.GetTime()*1.5+float64(a.ID)))) * 0.04
+	y := a.Pos.Y + 0.2 + bob
+	wood := mul(rl.NewColor(150, 110, 65, 255), a.Lum)
+	dark := mul(rl.NewColor(100, 70, 40, 255), a.Lum)
+	c := rl.NewVector3(a.Pos.X, y, a.Pos.Z)
+	rl.DrawCubeV(c, rl.NewVector3(1.2, 0.18, 2.0), dark) // floor
+	for _, sg := range []float32{-1, 1} {
+		rl.DrawCubeV(rl.Vector3Add(c, rl.Vector3Add(rl.Vector3Scale(side, sg*0.55), rl.NewVector3(0, 0.22, 0))), rl.NewVector3(0.12, 0.45, 2.0), wood)
+	}
+	for _, sg := range []float32{-1, 1} {
+		rl.DrawCubeV(rl.Vector3Add(c, rl.Vector3Add(rl.Vector3Scale(fwd, sg*1.0), rl.NewVector3(0, 0.25, 0))), rl.NewVector3(1.2, 0.5, 0.14), wood)
+	}
+	if a.HP < a.Spec.HP {
+		rl.DrawCubeV(rl.NewVector3(a.Pos.X, y+1, a.Pos.Z), rl.NewVector3(float32(a.HP)/float32(a.Spec.HP)*1.2, 0.08, 0.08), rl.Lime)
+	}
+}
+
+// spawnHorses scatters horses on the plains.
+func (g *Game) spawnHorses(n int) {
+	w := g.World
+	for i := 0; i < n*6 && n > 0; i++ {
+		p := w.RandomFreePoint(g.Player.Pos, 10)
+		lx, lz := wrapX(floorI(p.X)-originX), wrapZ(floorI(p.Z)-originZ)
+		if w.Biome[lz*worldW+lx] != BiomePlains || !w.PointFree(p, 0.6) {
+			continue
+		}
+		h := NewAnimal(p, AnimalHorse)
+		h.Coat = rand.Intn(3)
+		h.Walking = true
+		g.Animals = append(g.Animals, h)
+		n--
+	}
+}
+
+// tameHorse: two helpings of wheat or apples make a horse rideable.
+func (g *Game) tameHorse(a *Animal) {
+	p := g.Player
+	if a.Tamed {
+		g.mount(a)
+		return
+	}
+	if !(p.Held.Kind == ItemFood && (p.Held.Block == Apple || p.Held.Block == Bread)) && !(p.Held.Kind == ItemBlock && p.Held.Block == WheatItem) && p.Held.Block != WheatItem {
+		g.say("The horse snorts. Offer it wheat, bread or an apple.", 1.8)
+		return
+	}
+	p.Inv[p.Held.Block]--
+	p.EnsureHeld()
+	a.Flee = 0
+	g.burst(rl.Vector3Add(a.Pos, rl.NewVector3(0, 1.2, 0)), rl.NewColor(255, 120, 150, 255), 8)
+	g.Audio.Play(g.Audio.Eat, 0.6)
+	a.Visit++
+	if a.Visit >= 2 {
+		a.Tamed = true
+		g.say("The horse is yours. Right click to ride; SHIFT to dismount.", 3)
+		g.Audio.Play(g.Audio.Clear, 0.7)
+		g.unlock(AchHorse)
+	} else {
+		g.say("The horse nuzzles your hand. One more should do it.", 1.8)
+	}
+}
+
+// mount puts the player on a horse or boat.
+func (g *Game) mount(a *Animal) {
+	if g.isClient() {
+		g.say("Only the host can ride (for now)", 1.5)
+		return
+	}
+	g.Mount = a
+	g.Player.Mounted = true
+	g.Player.Flying = false
+	a.Walking = false
+	a.WanderT = 99
+	g.say("SHIFT dismounts", 1.2)
+}
+
+func (g *Game) dismount() {
+	if g.Mount == nil {
+		return
+	}
+	a := g.Mount
+	g.Mount = nil
+	g.Player.Mounted = false
+	side := rl.NewVector3(-a.Heading.Z, 0, a.Heading.X)
+	g.Player.Pos = rl.Vector3Add(a.Pos, rl.Vector3Scale(side, 1.2))
+	g.Player.Pos.Y = a.Pos.Y + 0.2
+	if g.World.WaterAt(g.Player.Pos) {
+		g.Player.Pos.Y += 0.5
+	}
+	a.WanderT = 1
+}
+
+// tickMount drives the mount from the player's steering and seats the player on it.
+func (g *Game) tickMount(dt float32) {
+	a := g.Mount
+	if a == nil {
+		return
+	}
+	p := g.Player
+	if !a.Alive || rl.IsKeyPressed(rl.KeyLeftShift) || rl.IsKeyPressed(rl.KeyRightShift) {
+		g.dismount()
+		return
+	}
+	w := g.World
+	move := p.MountMove
+	speed := float32(0)
+	inWater := w.WaterAt(rl.NewVector3(a.Pos.X, a.Pos.Y+0.2, a.Pos.Z))
+	switch a.Kind {
+	case AnimalHorse:
+		speed = 9
+		if p.Sprinting {
+			speed = 13
+		}
+		if inWater {
+			speed = 2.5
+		}
+		if p.MountJump && a.VelY == 0 && w.Solid(floorI(a.Pos.X), floorI(a.Pos.Y)-1, floorI(a.Pos.Z)) {
+			a.VelY = 8
+		}
+	case AnimalBoat:
+		speed = 8
+		if !inWater && !w.WaterAt(a.Pos) {
+			speed = 1.5 // dragging on land
+		}
+	}
+	if move.X != 0 || move.Z != 0 {
+		a.Heading = rl.Vector3Normalize(rl.NewVector3(move.X, 0, move.Z))
+		a.Phase += dt * speed * 1.4
+	}
+	var delta rl.Vector3
+	delta.X, delta.Z = move.X*speed*dt, move.Z*speed*dt
+	if inWater {
+		a.VelY = max(a.VelY-gravity*0.3*dt, -1.5)
+		if w.WaterAt(rl.NewVector3(a.Pos.X, a.Pos.Y+a.Spec.Height*0.6, a.Pos.Z)) || a.Kind == AnimalBoat {
+			a.VelY = min(a.VelY+16*dt, 2)
+		}
+	} else {
+		a.VelY = max(a.VelY-gravity*dt, -30)
+	}
+	delta.Y = a.VelY * dt
+	var res MoveResult
+	a.Pos, res = w.MoveBox(a.Pos, a.Spec.Radius, a.Spec.Height, delta, a.Kind == AnimalHorse)
+	a.Pos = WrapPos(a.Pos)
+	if res.Ground || res.Ceiling {
+		a.VelY = 0
+	}
+	seat := float32(1.35)
+	if a.Kind == AnimalBoat {
+		seat = 0.3
+	}
+	p.Pos = rl.NewVector3(a.Pos.X, a.Pos.Y+seat, a.Pos.Z)
+	p.InWater, p.HeadWater = false, false
+	if a.Kind == AnimalHorse && (move.X != 0 || move.Z != 0) && a.VelY == 0 {
+		p.BobPhase += dt * speed * 0.8
+		p.BobAmount = lerp(p.BobAmount, 0.6, dt*8)
+		if int(a.Phase*2)%3 == 0 && a.StepFlag != int(a.Phase*2) {
+			a.StepFlag = int(a.Phase * 2)
+			g.Audio.Play(g.Audio.Steps[1], 0.35)
+		}
+	}
+}
+
+// placeBoat drops a boat onto water in front of the player.
+func (g *Game) placeBoat() {
+	p := g.Player
+	o, d := p.Eye(), p.Forward()
+	for t := float32(0.5); t < 7; t += 0.25 {
+		q := rl.Vector3Add(o, rl.Vector3Scale(d, t))
+		if g.World.WaterAt(q) {
+			q.Y = float32(floorI(q.Y)) + 0.85
+			b := NewAnimal(q, AnimalBoat)
+			b.Heading = p.FlatForward()
+			g.Animals = append(g.Animals, b)
+			p.Inv[Boat]--
+			p.EnsureHeld()
+			g.Audio.Play(g.Audio.Splash, 0.6)
+			return
+		}
+		if g.World.Solid(floorI(q.X), floorI(q.Y), floorI(q.Z)) {
+			break
+		}
+	}
+	g.say("Aim at water to launch the boat", 1.2)
 }
 
 // spawnCats puts stray cats near villages and in forests.
@@ -670,6 +868,11 @@ func (g *Game) updateAnimals(dt float32) {
 		if a.Alive && a.Kind >= AnimalBronto {
 			g.dinoTick(a, dt)
 		}
+		if a == g.Mount {
+			alive++
+			keep = append(keep, a)
+			continue
+		}
 		t := g.nearestTarget(a.Pos)
 		if bite := a.Update(dt, g.World, t); bite > 0 {
 			g.hurtTargetFrom(t.ID, int(float32(bite)*damageScale()+0.5), "was eaten by a Dinosaur", true, a.Pos, 7)
@@ -726,11 +929,18 @@ func (g *Game) updateAnimals(dt float32) {
 		if g.dinoCount() < 8 && rand.Float32() < 0.25 {
 			g.spawnDinos(1)
 		}
+		horses := 0
 		cats := 0
 		for _, a := range g.Animals {
 			if a.Alive && a.Kind == AnimalCat && !a.Tamed {
 				cats++
 			}
+			if a.Alive && a.Kind == AnimalHorse {
+				horses++
+			}
+		}
+		if horses < 4 && rand.Float32() < 0.3 {
+			g.spawnHorses(1)
 		}
 		if cats < 3 && rand.Float32() < 0.3 {
 			g.spawnCats(1)
@@ -793,6 +1003,16 @@ func (g *Game) killAnimal(a *Animal) {
 		g.Score -= 50
 		if a.Tamed {
 			g.say("Your cat has died", 2.5)
+		}
+	case AnimalBoat:
+		g.spawnDrop(c, Boat, 0)
+		if g.Mount == a {
+			g.dismount()
+		}
+	case AnimalHorse:
+		g.spawnDrop(c, Leather, 0)
+		if g.Mount == a {
+			g.dismount()
 		}
 	case AnimalVillager:
 		g.Score -= 200

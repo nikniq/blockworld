@@ -41,6 +41,7 @@ const (
 	ItemFood
 	ItemBow
 	ItemRod
+	ItemBoat
 )
 
 // Item is one hotbar entry: a tool, or a stack of blocks from the inventory.
@@ -72,6 +73,9 @@ type Player struct {
 	Hunger    float32 // 0..20, drains with time and effort
 	StarveT   float32
 	Knock     rl.Vector3 // knockback velocity from a hit
+	Mounted   bool       // riding a horse or boat; the game moves the mount
+	MountMove rl.Vector3 // steering input while mounted
+	MountJump bool
 	Fishing   bool
 	Bobber    rl.Vector3
 	BiteT     float32 // seconds until the fish bites (counts down), negative while biting
@@ -191,6 +195,8 @@ func (p *Player) Hotbar() []Item {
 			items = append(items, Item{ItemBow, b})
 		} else if b == Rod && p.Inv[b] > 0 {
 			items = append(items, Item{ItemRod, b})
+		} else if b == Boat && p.Inv[b] > 0 {
+			items = append(items, Item{ItemBoat, b})
 		}
 	}
 	return items
@@ -387,93 +393,107 @@ func (p *Player) Update(dt float32, w *World) {
 	delta.Z += p.Knock.Z * dt
 	p.Knock = rl.Vector3Scale(p.Knock, max(0, 1-dt*7))
 
-	// Vertical: fly, swim in water, otherwise jump and fall.
-	if p.Flying {
+	if p.Mounted {
+		// The mount carries the player; steering goes to the game.
+		p.MountMove = rl.Vector3{}
+		if moving {
+			p.MountMove = rl.Vector3Normalize(move)
+		}
+		p.MountJump = rl.IsKeyPressed(rl.KeySpace)
 		p.VelY = 0
-		if rl.IsKeyDown(rl.KeySpace) {
-			p.VelY = speed * 0.8
+		p.OnGround = true
+		p.FallDmg = 0
+		p.Knock = rl.Vector3{}
+		p.Sprinting = rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl)
+	} else {
+		// Vertical: fly, swim in water, otherwise jump and fall.
+		if p.Flying {
+			p.VelY = 0
+			if rl.IsKeyDown(rl.KeySpace) {
+				p.VelY = speed * 0.8
+			}
+			if rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift) {
+				p.VelY = -speed * 0.8
+			}
+		} else if p.OnLadder && !p.InWater {
+			// Climb with jump or forward, otherwise slide down slowly.
+			p.VelY = -1.2
+			if rl.IsKeyDown(rl.KeySpace) || rl.IsKeyDown(rl.KeyW) {
+				p.VelY = 3.2
+			}
+			if p.Sneak {
+				p.VelY = 0
+			}
+		} else if p.InWater {
+			p.VelY = max(p.VelY-gravity*0.3*dt, -2.5)
+			if rl.IsKeyDown(rl.KeySpace) {
+				p.VelY = min(p.VelY+28*dt, 4)
+			}
+		} else {
+			if (p.OnGround || atSurface) && rl.IsKeyPressed(rl.KeySpace) {
+				p.VelY = jumpSpeed
+			}
+			p.VelY = max(p.VelY-gravity*dt, -30)
 		}
-		if rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift) {
-			p.VelY = -speed * 0.8
+		impact := p.VelY
+		wasGround := p.OnGround
+		var res MoveResult
+		if p.Flying {
+			p.Sneak = false // shift descends instead
 		}
-	} else if p.OnLadder && !p.InWater {
-		// Climb with jump or forward, otherwise slide down slowly.
-		p.VelY = -1.2
-		if rl.IsKeyDown(rl.KeySpace) || rl.IsKeyDown(rl.KeyW) {
-			p.VelY = 3.2
+		if p.Sneak && p.OnGround && !p.InWater {
+			// Sneaking never walks off an edge: apply each axis only if ground remains.
+			for _, d := range [2]rl.Vector3{{X: delta.X}, {Z: delta.Z}} {
+				try, _ := w.MoveBox(p.Pos, playerHalfW, playerHeight, d, false)
+				if w.HasGround(try, playerHalfW) {
+					p.Pos = try
+				}
+			}
+			p.Pos, res = w.MoveBox(p.Pos, playerHalfW, playerHeight, rl.NewVector3(0, p.VelY*dt, 0), false)
+		} else {
+			delta.Y = p.VelY * dt
+			p.Pos, res = w.MoveBox(p.Pos, playerHalfW, playerHeight, delta, false)
 		}
-		if p.Sneak {
+		p.Pos = WrapPos(p.Pos)
+		p.wasLadder = p.OnLadder
+		if res.Ground || res.Ceiling {
 			p.VelY = 0
 		}
-	} else if p.InWater {
-		p.VelY = max(p.VelY-gravity*0.3*dt, -2.5)
-		if rl.IsKeyDown(rl.KeySpace) {
-			p.VelY = min(p.VelY+28*dt, 4)
+		if p.Flying && res.Ground && rl.IsKeyDown(rl.KeyLeftShift) {
+			p.Flying = false // landed
 		}
-	} else {
-		if (p.OnGround || atSurface) && rl.IsKeyPressed(rl.KeySpace) {
-			p.VelY = jumpSpeed
+		if (p.InWater || atSurface) && res.Wall && moving {
+			p.VelY = max(p.VelY, 5.5) // swimming against a bank climbs out of the water
 		}
-		p.VelY = max(p.VelY-gravity*dt, -30)
-	}
-	impact := p.VelY
-	wasGround := p.OnGround
-	var res MoveResult
-	if p.Flying {
-		p.Sneak = false // shift descends instead
-	}
-	if p.Sneak && p.OnGround && !p.InWater {
-		// Sneaking never walks off an edge: apply each axis only if ground remains.
-		for _, d := range [2]rl.Vector3{{X: delta.X}, {Z: delta.Z}} {
-			try, _ := w.MoveBox(p.Pos, playerHalfW, playerHeight, d, false)
-			if w.HasGround(try, playerHalfW) {
-				p.Pos = try
+		p.OnGround = res.Ground
+		if p.OnGround && !wasGround && impact < -fallSafeV && !p.InWater && !p.OnLadder && !p.Flying {
+			p.FallDmg = int((-impact - fallSafeV) * 3)
+			p.Hurt(p.FallDmg, "fell from a high place", false)
+		}
+		p.HeadWater = w.WaterAt(p.Eye())
+		// Lava burns.
+		if p.InLava {
+			p.LavaT += dt
+			if p.LavaT >= 0.4 {
+				p.LavaT = 0
+				p.Hurt(6, "tried to swim in lava", false)
 			}
-		}
-		p.Pos, res = w.MoveBox(p.Pos, playerHalfW, playerHeight, rl.NewVector3(0, p.VelY*dt, 0), false)
-	} else {
-		delta.Y = p.VelY * dt
-		p.Pos, res = w.MoveBox(p.Pos, playerHalfW, playerHeight, delta, false)
-	}
-	p.Pos = WrapPos(p.Pos)
-	p.wasLadder = p.OnLadder
-	if res.Ground || res.Ceiling {
-		p.VelY = 0
-	}
-	if p.Flying && res.Ground && rl.IsKeyDown(rl.KeyLeftShift) {
-		p.Flying = false // landed
-	}
-	if (p.InWater || atSurface) && res.Wall && moving {
-		p.VelY = max(p.VelY, 5.5) // swimming against a bank climbs out of the water
-	}
-	p.OnGround = res.Ground
-	if p.OnGround && !wasGround && impact < -fallSafeV && !p.InWater && !p.OnLadder && !p.Flying {
-		p.FallDmg = int((-impact - fallSafeV) * 3)
-		p.Hurt(p.FallDmg, "fell from a high place", false)
-	}
-	p.HeadWater = w.WaterAt(p.Eye())
-	// Lava burns.
-	if p.InLava {
-		p.LavaT += dt
-		if p.LavaT >= 0.4 {
+		} else {
 			p.LavaT = 0
-			p.Hurt(6, "tried to swim in lava", false)
 		}
-	} else {
-		p.LavaT = 0
-	}
 
-	// Cactus spines.
-	if w.TouchesBlock(p.Pos, playerHalfW, playerHeight, Cactus) {
-		p.CactusT += dt
-		if p.CactusT >= 0.5 {
-			p.CactusT = 0
-			p.Hurt(2, "was pricked to death", false)
+		// Cactus spines.
+		if w.TouchesBlock(p.Pos, playerHalfW, playerHeight, Cactus) {
+			p.CactusT += dt
+			if p.CactusT >= 0.5 {
+				p.CactusT = 0
+				p.Hurt(2, "was pricked to death", false)
+			}
+		} else {
+			p.CactusT = 0.4
 		}
-	} else {
-		p.CactusT = 0.4
-	}
 
+	}
 	// Head bob, footsteps and sneak camera.
 	p.Stepped = false
 	if moving && p.OnGround {

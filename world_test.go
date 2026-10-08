@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"math/rand"
 	"testing"
 
@@ -185,7 +186,7 @@ func TestAtlas(t *testing.T) {
 			if c.A == 255 {
 				t.Errorf("%s should be translucent", blocks[b].Name)
 			}
-		} else if blocks[b].Tiny || blocks[b].Item || b == Leaves || b == SpruceLeaves {
+		} else if blocks[b].Tiny || blocks[b].Item || b == Leaves || b == SpruceLeaves || b == EucLeaves || b == FruitLeaves {
 			continue // plants, items and leaves are alpha-cutout tiles
 		} else if c.A != 255 {
 			t.Errorf("%s tile is transparent", blocks[b].Name)
@@ -1121,5 +1122,70 @@ func TestCats(t *testing.T) {
 	g.catTick(c, 0.1)
 	if e.Fuse != 0 || WrapDist(e.Pos, c.Pos) <= before {
 		t.Fatal("creepers should back away from a cat")
+	}
+}
+
+// Horses tame with two apples and carry the player; boats launch on water and carry the player.
+func TestRiding(t *testing.T) {
+	rand.Seed(25)
+	g := &Game{Audio: &Audio{}, CraftHover: -1}
+	g.Reset()
+	p := g.Player
+	h := NewAnimal(rl.NewVector3(p.Pos.X+2, p.Pos.Y, p.Pos.Z), AnimalHorse)
+	g.Animals = append(g.Animals, h)
+	p.Inv[Apple] = 2
+	p.Held = Item{ItemFood, Apple}
+	g.tameHorse(h)
+	p.Held = Item{ItemFood, Apple}
+	g.tameHorse(h)
+	if !h.Tamed || p.Inv[Apple] != 0 {
+		t.Fatal("two apples should tame the horse")
+	}
+	g.tameHorse(h)
+	if g.Mount != h || !p.Mounted {
+		t.Fatal("right click on a tamed horse should mount")
+	}
+	start := h.Pos
+	p.MountMove = rl.NewVector3(1, 0, 0)
+	for i := 0; i < 30; i++ {
+		g.tickMount(1.0 / 60)
+	}
+	if WrapDist(h.Pos, start) < 1 || WrapDist(p.Pos, h.Pos) > 2 {
+		t.Fatalf("horse should carry the rider: moved %v, rider gap %v", WrapDist(h.Pos, start), WrapDist(p.Pos, h.Pos))
+	}
+	g.dismount()
+	if p.Mounted || g.Mount != nil {
+		t.Fatal("dismount should free the player")
+	}
+	// Boat: place on water and board. Dig a pool in the flat spawn clearing.
+	w := g.World
+	p.Pos = g.Spawn
+	py := int(p.Pos.Y)
+	x, z := floorI(p.Pos.X)+3, floorI(p.Pos.Z)
+	for dx := 0; dx < 3; dx++ {
+		for dy := -2; dy < 3; dy++ {
+			w.Set(x+dx, py+dy, z, Air)
+		}
+		w.Set(x+dx, py-1, z, Water)
+		w.Set(x+dx, py-2, z, Water)
+	}
+	p.Pos = rl.NewVector3(float32(x)-1.5, float32(py), float32(z)+0.5)
+	p.Yaw = math.Pi / 2 // face +X
+	p.Pitch = -0.5
+	p.Inv[Boat] = 1
+	p.Held = Item{ItemBoat, Boat}
+	g.placeBoat()
+	var boat *Animal
+	for _, a := range g.Animals {
+		if a.Kind == AnimalBoat {
+			boat = a
+		}
+	}
+	if boat == nil || p.Inv[Boat] != 0 {
+		t.Fatal("boat should launch onto the water")
+	}
+	g.mount(boat)
+	if g.Mount != boat {
+		t.Fatal("boarding should mount the boat")
 	}
 }

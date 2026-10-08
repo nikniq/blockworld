@@ -34,6 +34,9 @@ const (
 	SkinCat
 	SkinCatBlack
 	SkinCatTabby
+	SkinHorse
+	SkinHorseBlack
+	SkinHorseWhite
 	SkinKangaroo
 	SkinEmu
 	SkinKoala
@@ -370,6 +373,39 @@ func paintSkin(kind SkinKind, part, face, x, y int) rl.Color {
 			}
 		}
 		return shade(fur)
+	case SkinHorse, SkinHorseBlack, SkinHorseWhite:
+		fur := col(120, 80, 50)
+		if kind == SkinHorseBlack {
+			fur = col(45, 40, 40)
+		} else if kind == SkinHorseWhite {
+			fur = col(225, 220, 210)
+		}
+		if part == PartHead {
+			if face == 4 {
+				if y >= 12 && (x <= 5 || x >= 10) && y <= 13 {
+					return col(40, 30, 30) // nostrils
+				}
+				if y >= 11 {
+					return shade(mul(fur, 0.8)) // muzzle
+				}
+				if y >= 4 && y <= 5 && (x == 2 || x == 13) {
+					return col(20, 20, 20) // eyes on the sides
+				}
+				if y <= 4 && (x >= 6 && x <= 9) {
+					return shade(col(240, 235, 230)) // blaze
+				}
+			}
+			if (face == 2 || face == 3) && y >= 4 && y <= 5 && x >= 5 && x <= 6 {
+				return col(20, 20, 20)
+			}
+			if face == 0 && (x <= 2 || x >= 13) && y <= 3 {
+				return shade(mul(fur, 0.7)) // ears
+			}
+		}
+		if (part == PartLegFL || part == PartLegFR || part == PartLegBL || part == PartLegBR) && y >= 13 {
+			return shade(col(50, 45, 40)) // hooves
+		}
+		return shade(fur)
 	case SkinKangaroo:
 		fur := col(172, 122, 82)
 		if face == 1 || (part == PartBody && face == 4 && x > 4 && x < 11) {
@@ -528,7 +564,7 @@ func materialOf(kind SkinKind, part int) material {
 		return matBone
 	case SkinCreeper, SkinCroc, SkinDino, SkinRaptor, SkinBronto:
 		return matScale
-	case SkinSpider, SkinPig, SkinCow, SkinSheep, SkinWolf, SkinCat, SkinCatBlack, SkinCatTabby, SkinKangaroo, SkinEmu, SkinKoala, SkinWombat, SkinPlatypus:
+	case SkinSpider, SkinPig, SkinCow, SkinSheep, SkinWolf, SkinCat, SkinCatBlack, SkinCatTabby, SkinHorse, SkinHorseBlack, SkinHorseWhite, SkinKangaroo, SkinEmu, SkinKoala, SkinWombat, SkinPlatypus:
 		return matFur
 	}
 	return matFlat
@@ -844,6 +880,8 @@ func (s *Skins) DrawQuadruped(w *World, kind SkinKind, p *Pose) {
 		body, head, legH, legW = rl.NewVector3(0.6, 0.5, 1.0), rl.NewVector3(0.5, 0.5, 0.5), 0.375, 0.25
 	case SkinCow:
 		body, head, legH, legW = rl.NewVector3(0.75, 0.65, 1.15), rl.NewVector3(0.5, 0.5, 0.4), 0.75, 0.25
+	case SkinHorse, SkinHorseBlack, SkinHorseWhite:
+		body, head, legH, legW = rl.NewVector3(0.6, 0.6, 1.3), rl.NewVector3(0.32, 0.4, 0.7), 0.85, 0.18
 	default:
 		body, head, legH, legW = rl.NewVector3(0.75, 0.6, 1.0), rl.NewVector3(0.4, 0.4, 0.45), 0.55, 0.22
 	}
