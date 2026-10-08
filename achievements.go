@@ -33,6 +33,7 @@ const (
 	AchBeacon
 	AchWolf
 	AchFish
+	AchMeteor
 	numAch
 )
 
@@ -61,6 +62,7 @@ var achievements = [numAch]achievement{
 	AchBeacon:      {"Conqueror", "Light the ancient beacon"},
 	AchWolf:        {"Best Friend", "Tame a wolf"},
 	AchFish:        {"Gone Fishing", "Catch a fish"},
+	AchMeteor:      {"Sky Fall", "Witness an asteroid strike"},
 }
 
 type Toast struct {

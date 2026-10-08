@@ -74,6 +74,8 @@ const (
 	Fish
 	Rod
 	DeepStone
+	Meteorite
+	FruitLeaves
 	Glowshroom
 	Amethyst
 	RedSand
@@ -261,6 +263,10 @@ var blocks = [numBlocks]blockInfo{
 		Pat: [3]texPattern{PatFish, PatFish, PatFish}, MineTime: 0.1, Drops: Fish, Food: 5},
 	Rod: {Name: "Fishing Rod", Top: col(130, 90, 50), Side: col(130, 90, 50), Bottom: col(130, 90, 50),
 		Pat: [3]texPattern{PatRod, PatRod, PatRod}, MineTime: 0.1, Drops: Rod, Item: true},
+	Meteorite: {Name: "Meteorite", Top: col(60, 55, 60), Side: col(55, 50, 55), Bottom: col(50, 45, 50),
+		Pat: [3]texPattern{PatMeteor, PatMeteor, PatMeteor}, MineTime: 4, Hard: true, MinTier: TierStone, Drops: Meteorite, Solid: true, Emit: 4},
+	FruitLeaves: {Name: "Apple Tree Leaves", Top: col(58, 132, 48), Side: col(54, 124, 46), Bottom: col(48, 110, 42),
+		Pat: [3]texPattern{PatFruit, PatFruit, PatFruit}, MineTime: 0.3, Drops: Leaves, Solid: true},
 	DeepStone: {Name: "Deep Stone", Top: col(70, 72, 80), Side: col(66, 68, 76), Bottom: col(60, 62, 70),
 		Pat: [3]texPattern{PatNoise, PatNoise, PatNoise}, MineTime: 4.5, Hard: true, Drops: Cobble, Solid: true},
 	Glowshroom: {Name: "Glowshroom", Top: col(120, 200, 230), Side: col(120, 200, 230), Bottom: col(120, 200, 230),
@@ -291,7 +297,7 @@ func (b Block) lightCost() uint8 {
 	switch {
 	case b == Air || blocks[b].Tiny || b == Glass || b == Lava:
 		return 1
-	case b == Water || b == Leaves || b == SpruceLeaves || b == EucLeaves:
+	case b == Water || b == Leaves || b == SpruceLeaves || b == EucLeaves || b == FruitLeaves:
 		return 2
 	}
 	return 0
@@ -1103,6 +1109,70 @@ func (w *World) placeSpruce(x, y, z int, set func(x, y, z int, b Block)) {
 	set(x, y+th, z, SpruceLeaves)
 }
 
+// isLog and leafFor describe trunks and the leaves they regrow.
+func isLog(b Block) bool { return b == Log || b == BirchLog || b == EucLog }
+
+func (w *World) leafFor(lx, y, lz int, log Block) Block {
+	if log == EucLog {
+		return EucLeaves
+	}
+	// Spruce and oak share the log: copy whatever leaves the tree already has.
+	for _, d := range [][3]int{{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}, {0, 1, 0}, {1, 1, 0}, {-1, 1, 0}, {0, 1, 1}, {0, 1, -1}} {
+		if b := w.getLocal(lx+d[0], y+d[1], lz+d[2]); b == SpruceLeaves {
+			return SpruceLeaves
+		}
+	}
+	return Leaves
+}
+
+// RegrowTrees gives damaged trees their leaves back and lets oaks bear fruit.
+// It samples a slice of the world each call so the cost stays small.
+func (w *World) RegrowTrees(slice, slices int) (grown int) {
+	for lz := slice; lz < worldD; lz += slices {
+		for lx := 0; lx < worldW; lx++ {
+			top := w.Height[lz*worldW+lx]
+			for y := 2; y < top; y++ {
+				b := w.getLocal(lx, y, lz)
+				switch {
+				case isLog(b):
+					// A trunk cell with sky above and air beside it near the top regrows a canopy.
+					if !isLog(w.getLocal(lx, y+1, lz)) || hash2(lx, y*31+lz, 4242) < 0.3 {
+						for _, d := range [][3]int{{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}, {0, 1, 0}} {
+							nx, ny, nz := lx+d[0], y+d[1], lz+d[2]
+							if w.getLocal(nx, ny, nz) == Air && w.sunLocal(nx, ny, nz) >= 10 && hash2(nx, ny*17+nz, int(w.Version)) < 0.25 {
+								w.Set(nx+originX, ny, nz+originZ, w.leafFor(lx, y, lz, b))
+								grown++
+							}
+						}
+					}
+				case b == Leaves:
+					// Leaves next to a trunk ripen into fruit occasionally; leaves also spread one step out.
+					nearLog := false
+					for _, d := range [][3]int{{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}, {0, -1, 0}, {0, 1, 0}} {
+						if isLog(w.getLocal(lx+d[0], y+d[1], lz+d[2])) {
+							nearLog = true
+						}
+					}
+					if nearLog {
+						if hash2(lx, y*13+lz, int(w.Version)+1) < 0.04 {
+							w.Set(lx+originX, y, lz+originZ, FruitLeaves)
+							grown++
+						}
+						for _, d := range [][3]int{{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}} {
+							nx, nz := lx+d[0], lz+d[1]
+							if w.getLocal(nx, y, nz) == Air && w.sunLocal(nx, y, nz) >= 10 && hash2(nx, y*19+nz, int(w.Version)+2) < 0.06 {
+								w.Set(nx+originX, y, nz+originZ, Leaves)
+								grown++
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return grown
+}
+
 // GrowTree turns a sapling at world (x, y, z) into a tree if there is room.
 func (w *World) GrowTree(x, y, z int) bool {
 	lx, lz := x-originX, z-originZ
@@ -1391,7 +1461,7 @@ func (m *meshBuf) emitFaceUV(f *faceDef, u0, v0, u1, v1, x, y, z float32, box [2
 // biomeTintCode returns the vertex-alpha code the shader turns into a biome
 // colour for foliage faces, or 255 for faces that keep their texture colour.
 func biomeTintCode(b Block, f *faceDef, biome Biome) uint8 {
-	foliage := b == Leaves || b == SpruceLeaves || b == EucLeaves || b == TallGrass || b == Sapling || (b == Grass && f.n[1] > 0)
+	foliage := b == Leaves || b == SpruceLeaves || b == EucLeaves || b == FruitLeaves || b == TallGrass || b == Sapling || (b == Grass && f.n[1] > 0)
 	if !foliage {
 		return 255
 	}
@@ -1507,7 +1577,7 @@ func (w *World) buildChunk(ci, cj int, c *chunk) {
 					f := &faces[fi]
 					nx, ny, nz := lx+f.n[0], y+f.n[1], lz+f.n[2]
 					nb := w.getLocal(nx, ny, nz)
-					leafy := b == Leaves || b == SpruceLeaves || b == EucLeaves
+					leafy := b == Leaves || b == SpruceLeaves || b == EucLeaves || b == FruitLeaves
 					if (nb.Opaque() && !(leafy && nb == b)) || (trans && nb == b) {
 						continue
 					}

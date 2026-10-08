@@ -36,6 +36,7 @@ type Audio struct {
 	Music    rl.Sound // generated ambient loop
 	Roar     rl.Sound
 	Laugh    rl.Sound
+	Alarm    rl.Sound
 	Thunder  rl.Sound
 	Rain     rl.Sound
 	Rattle   rl.Sound
@@ -133,6 +134,13 @@ func NewAudio() *Audio {
 		crack := noise() * exp(14, t) * 0.9
 		rumble := (noise()*0.5 + sin(38, t)*0.4) * float32(math.Exp(-float64((t-0.3)*1.6))) * float32(math.Min(1, float64(t*3)))
 		return crack + rumble*0.7
+	})
+	a.Alarm = a.synth(1.6, func(t float32) float32 {
+		f := float32(520)
+		if int(t*4)%2 == 1 {
+			f = 700
+		}
+		return (saw(f, t)*0.4 + sin(f, t)*0.4) * float32(math.Min(1, float64(t*20))) * 0.7
 	})
 	a.Laugh = a.synth(2.4, func(t float32) float32 {
 		// Kookaburra: slow "koo" notes that speed up into a cackle.

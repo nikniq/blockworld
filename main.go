@@ -94,6 +94,10 @@ type Game struct {
 	RainCD      float32
 	SpawnerCD   float32
 	DeepCD      float32
+	Asteroid    Asteroid
+	AsteroidCD  float32
+	RegrowCD    float32
+	RegrowSlice int
 
 	Net            *Net
 	JoinText       string
@@ -193,6 +197,8 @@ func (g *Game) Reset() {
 	g.spawnWildlife(12)
 	g.spawnWaterLife(6)
 	g.Won = false
+	g.Asteroid = Asteroid{}
+	g.AsteroidCD = asteroidEvery * 0.5
 	g.say("Day 1  -  mine, craft and build before dark. Find and light the ancient beacon.", 5)
 }
 
@@ -779,6 +785,22 @@ func (g *Game) updateBuilder(dt float32) {
 	} else {
 		p.Mining = false
 	}
+	if usePressed() && w.Get(a.X, a.Y, a.Z) == FruitLeaves {
+		if g.isClient() {
+			g.sendToHost(&Msg{Place: &struct {
+				X, Y, Z int
+				B       Block
+			}{a.X, a.Y, a.Z, Leaves}})
+		} else {
+			w.Set(a.X, a.Y, a.Z, Leaves)
+		}
+		p.Inv[Apple] += 1 + rand.Intn(2)
+		p.Swing = 1
+		g.say("Picked apples", 1)
+		g.Audio.Play(g.Audio.Pickup, 0.6)
+		p.EnsureHeld()
+		return
+	}
 	if usePressed() && w.Get(a.X, a.Y, a.Z) == Beacon {
 		if g.isClient() {
 			g.say("Only the host can light the beacon", 2)
@@ -868,6 +890,12 @@ func (g *Game) breakBlock(x, y, z int) {
 	}
 	if b == Leaves && rand.Float32() < 0.06 {
 		g.spawnDrop(centre, Apple, 0)
+	}
+	if b == FruitLeaves {
+		g.spawnDrop(centre, Apple, 0)
+		if rand.Float32() < 0.5 {
+			g.spawnDrop(centre, Apple, 0)
+		}
 	}
 	if b == TallGrass && rand.Float32() < 0.3 {
 		g.spawnDrop(centre, Seeds, 0)
@@ -974,6 +1002,10 @@ func (g *Game) soak(frame int) bool {
 		w.Set(x+2, y+1, z, Ladder)
 		g.GrowCD = 0
 		g.trySleep()
+	}
+	if frame%1500 == 0 {
+		g.asteroidImpact(rl.Vector3Add(p.Pos, rl.NewVector3(12, 0, 0)))
+		g.World.RegrowTrees(0, 1)
 	}
 	if frame%650 == 0 {
 		q := w.RandomFreePoint(p.Pos, 4)
@@ -1209,6 +1241,17 @@ func (g *Game) giantSmash(e *Enemy) {
 	}
 	g.Shake = max(g.Shake, 0.3)
 	g.Audio.Play(g.Audio.Dig, 0.6)
+}
+
+// tickRegrow walks a slice of the world every few seconds so trees heal and fruit.
+func (g *Game) tickRegrow(dt float32) {
+	g.RegrowCD -= dt
+	if g.RegrowCD > 0 {
+		return
+	}
+	g.RegrowCD = 2.5
+	g.World.RegrowTrees(g.RegrowSlice, 16)
+	g.RegrowSlice = (g.RegrowSlice + 1) % 16
 }
 
 // tickDeep breeds cave spiders in the dark around anyone exploring below the surface.
@@ -1552,6 +1595,8 @@ func (g *Game) worldUpdate(dt float32) {
 	g.growSaplings(dt)
 	g.tickSpawners(dt)
 	g.tickDeep(dt)
+	g.tickAsteroid(dt)
+	g.tickRegrow(dt)
 	g.updateSleep(dt)
 }
 
@@ -1582,6 +1627,12 @@ func (g *Game) clientUpdate(dt float32) {
 		}
 	}
 	g.updateSleep(dt)
+	if g.Asteroid.Active {
+		g.Asteroid.T -= dt
+		if g.Asteroid.T <= 0 {
+			g.Asteroid.Active = false
+		}
+	}
 	g.tickEffects(dt)
 	g.checkDeath()
 }
@@ -1742,6 +1793,7 @@ func (g *Game) draw3D() {
 	}
 	g.drawBolt()
 	g.drawBobber()
+	g.drawAsteroid(cam)
 	for _, s := range g.Sparks {
 		if s.Block != Air {
 			m := rl.MatrixMultiply(rl.MatrixMultiply(rl.MatrixScale(0.12, 0.12, 0.12), rl.MatrixRotateY(s.Spin)), rl.MatrixTranslate(s.Pos.X, s.Pos.Y, s.Pos.Z))
@@ -2344,6 +2396,18 @@ func (g *Game) drawHUD() {
 
 	g.drawMinimap(sw)
 
+	if g.Asteroid.Active {
+		warn := "ASTEROID  -  " + g.asteroidBearing()
+		fs := int32(26)
+		tw := rl.MeasureText(warn, fs)
+		blink := int(rl.GetTime()*4)%2 == 0 || g.Asteroid.T > 6
+		c := rl.NewColor(255, 90, 60, 255)
+		if !blink {
+			c = rl.NewColor(255, 200, 80, 255)
+		}
+		rl.DrawRectangle(cx-tw/2-12, 170, tw+24, 36, rl.NewColor(0, 0, 0, 170))
+		rl.DrawText(warn, cx-tw/2, 176, fs, c)
+	}
 	// Message.
 	if g.MsgT > 0 {
 		fs := int32(32)
@@ -2496,6 +2560,7 @@ func (g *Game) drawHelp(sw, sh int32) {
 		"Wolves: feed one meat or fish twice to tame it. Fishing rod: planks and wool; cast at water.",
 		"Outback: red sand, eucalyptus, kangaroos, emus, wombats. Koalas and platypuses are protected. Mind the crocodiles.",
 		"The deep: below the dark stone lie vast caverns, lakes, ravines, glowshrooms, amethyst, diamonds and cave spiders.",
+		"Asteroids fall now and then: heed the warning and its bearing. Mine the meteorite. Trees regrow leaves; pick apples off red-dotted leaves.",
 		"H closes this help",
 	}
 	w := int32(760)
@@ -3141,6 +3206,13 @@ func (g *Game) scriptedShots(frame int) bool {
 			g.Player.MineT = g.Player.MineTime(g.World.Get(a.X, a.Y, a.Z)) * 0.6
 		}
 		rl.TakeScreenshot("shot_day.png")
+	case 235:
+		g.Asteroid = Asteroid{Target: rl.Vector3Add(g.Player.Pos, rl.NewVector3(20, 0, -20)), T: 6, Active: true}
+		g.Player.Pitch = 0.35
+		g.Player.Yaw = math.Pi * 0.75
+	case 238:
+		rl.TakeScreenshot("shot_asteroid.png")
+		g.Asteroid.Active = false
 	case 240:
 		g.Sky.T = 0.72
 		g.Player.Pitch = -0.1

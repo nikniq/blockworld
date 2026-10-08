@@ -60,6 +60,8 @@ const (
 	PatRod
 	PatShroom
 	PatAmethyst
+	PatMeteor
+	PatFruit
 )
 
 const (
@@ -459,6 +461,23 @@ func texel(p texPattern, base rl.Color, info *blockInfo, x, y, seed int) rl.Colo
 			return mul(rl.NewColor(230, 200, 255, 255), 0.9+0.2*n) // crystal facets
 		}
 		return mul(base, 0.8+0.35*n)
+	case PatMeteor:
+		if hash2(x/2, y/2, seed+4) < 0.18 {
+			return mul(rl.NewColor(255, 150, 60, 255), 0.8+0.4*n) // glowing veins
+		}
+		return mul(base, 0.6+0.6*n)
+	case PatFruit:
+		if hash2(x, y, seed+9) < 0.16 {
+			return rl.NewColor(0, 0, 0, 0)
+		}
+		if hash2(x/3, y/3, seed+5) < 0.14 && x%3 == 1 && y%3 == 1 {
+			return rl.NewColor(215, 40, 40, 255) // apples
+		}
+		v := 0.6 + 0.6*n
+		if n < 0.08 {
+			v = 0.3
+		}
+		return mul(base, v)
 	case PatTorch:
 		if y < 6 {
 			return mul(blocks[Torch].Top, 0.85+0.3*n)

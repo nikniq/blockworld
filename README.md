@@ -76,6 +76,11 @@ block textures and sound effects are generated at startup.
   trade: gold ore for rifle ammo, iron for diamonds, wool for bread, coal for TNT, and more.
 - **Abandoned mineshafts**: timbered corridors with plank floors, torches and loot crates run through the
   rock, waiting to be broken into.
+- **Asteroids**: every so often a rock falls from the sky. A blinking warning gives the bearing, distance and
+  a twenty-second countdown while the fireball streaks in; the impact blasts a crater and scatters
+  glowing meteorite, which smelts into iron or rifle ammo.
+- **Living trees**: damaged trees regrow their leaves, canopies slowly fill out, and oak leaves next to the
+  trunk ripen into apple-bearing leaves (red dots). Right click them to pick apples.
 - **Storms**: heavy rain brings lightning: a flash, a bolt, and thunder that rolls in after a delay.
 - **Animals**: pigs, cows and sheep graze on the grass and flee when hurt. They drop raw meat;
   hold it and right click to eat for 30 health.

@@ -107,6 +107,7 @@ const (
 	FxPlace
 	FxShot
 	FxMessage
+	FxAsteroid
 )
 
 type Fx struct {
@@ -478,7 +479,9 @@ func (g *Game) hostHandle(from uint32, m *Msg) {
 		if r, ok := g.Remotes[from]; ok && w.InBounds(pl.X, pl.Y, pl.Z) && withinReach(r.Pos, pl.X, pl.Y, pl.Z) {
 			t := w.Get(pl.X, pl.Y, pl.Z)
 			door := (t == DoorClosed || t == DoorOpen) && (pl.B == DoorClosed || pl.B == DoorOpen)
-			if door && !(pl.B == DoorClosed && g.blockOccupied(pl.X, pl.Y, pl.Z)) {
+			if t == FruitLeaves && pl.B == Leaves {
+				w.Set(pl.X, pl.Y, pl.Z, Leaves)
+			} else if door && !(pl.B == DoorClosed && g.blockOccupied(pl.X, pl.Y, pl.Z)) {
 				w.Set(pl.X, pl.Y, pl.Z, pl.B)
 			} else if pl.B.Placeable() && (t == Air || (t.Liquid() && !blocks[pl.B].Tiny)) && !(blocks[pl.B].Solid && g.blockOccupied(pl.X, pl.Y, pl.Z)) {
 				w.Set(pl.X, pl.Y, pl.Z, pl.B)
@@ -721,6 +724,9 @@ func (g *Game) clientHandle(m *Msg) {
 			}
 		case FxMessage:
 			g.say(fx.Text, 3)
+		case FxAsteroid:
+			g.Asteroid = Asteroid{Target: fx.Pos, T: fx.Shake, Active: true}
+			g.Audio.Play(g.Audio.Alarm, 0.9)
 		}
 	}
 }

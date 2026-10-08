@@ -988,3 +988,65 @@ func TestDeepCaves(t *testing.T) {
 		t.Fatalf("spawn %v, sea %d", s, seaLevel)
 	}
 }
+
+// Trees regrow leaves and bear fruit; an asteroid craters the ground and leaves meteorite.
+func TestRegrowthAndAsteroid(t *testing.T) {
+	rand.Seed(22)
+	g := &Game{Audio: &Audio{}, CraftHover: -1}
+	g.Reset()
+	w := g.World
+	// Strip a tree's canopy and let it regrow.
+	var tx, ty, tz int
+	found := false
+	for i, b := range w.Blocks {
+		if b == Log && !found {
+			tx = i%worldW + originX
+			tz = (i/worldW)%worldD + originZ
+			ty = i / (worldW * worldD)
+			if w.Get(tx, ty+1, tz) == Log && w.Get(tx, ty+2, tz) == Log {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Skip("no tree")
+	}
+	for dy := 0; dy < 10; dy++ {
+		for dx := -3; dx <= 3; dx++ {
+			for dz := -3; dz <= 3; dz++ {
+				if b := w.Get(tx+dx, ty+dy, tz+dz); b == Leaves || b == FruitLeaves || b == SpruceLeaves {
+					w.Set(tx+dx, ty+dy, tz+dz, Air)
+				}
+			}
+		}
+	}
+	w.flushLight()
+	grown := 0
+	for i := 0; i < 64; i++ {
+		grown += w.RegrowTrees(i%16, 16)
+		w.flushLight()
+	}
+	if grown == 0 {
+		t.Fatal("stripped tree should regrow leaves")
+	}
+	// Asteroid: impact leaves a crater and meteorite blocks.
+	at := rl.NewVector3(g.Spawn.X+30, float32(w.SurfaceY(floorI(g.Spawn.X)+30, floorI(g.Spawn.Z))), g.Spawn.Z)
+	g.asteroidImpact(at)
+	met := 0
+	for _, b := range w.Blocks {
+		if b == Meteorite {
+			met++
+		}
+	}
+	if met == 0 {
+		t.Fatal("impact should leave meteorite")
+	}
+	if w.Get(floorI(at.X), floorI(at.Y)-1, floorI(at.Z)) != Air && w.Get(floorI(at.X), floorI(at.Y)-2, floorI(at.Z)) != Air {
+		t.Fatal("impact should crater the ground")
+	}
+	// Warning text names a bearing and countdown.
+	g.Asteroid = Asteroid{Target: at, T: 12, Active: true}
+	if s := g.asteroidBearing(); len(s) < 10 {
+		t.Fatalf("bearing %q", s)
+	}
+}
