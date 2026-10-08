@@ -123,7 +123,7 @@ func NewPlayer(pos rl.Vector3) *Player {
 		Held:      Item{Kind: ItemPickaxe},
 	}
 	p.Inv[Planks] = 16
-	p.Inv[Torch] = 4
+	p.Inv[Torch] = 40
 	return p
 }
 

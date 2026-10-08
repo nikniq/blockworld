@@ -225,7 +225,7 @@ func TestLighting(t *testing.T) {
 	}
 	w.Set(x, y, z, Torch)
 	w.flushLight()
-	if w.blockLocal(lx, y, lz) != 14 || w.blockLocal(lx+1, y, lz) != 13 {
+	if w.blockLocal(lx, y, lz) != 15 || w.blockLocal(lx+1, y, lz) != 14 {
 		t.Fatalf("torch light %d, neighbour %d", w.blockLocal(lx, y, lz), w.blockLocal(lx+1, y, lz))
 	}
 	if w.Luminance(rl.NewVector3(s.X, float32(y), s.Z), 1) <= w.Luminance(rl.NewVector3(s.X+1, float32(y), s.Z), 1) {
@@ -300,7 +300,7 @@ func TestSaveLoad(t *testing.T) {
 	if g2.World.Get(3, 20, 3) != TNT || g2.World.Get(3, 21, 3) != Torch {
 		t.Fatal("blocks not restored")
 	}
-	if g2.World.blockLocal(3-originX, 21, 3-originZ) != 14 {
+	if g2.World.blockLocal(3-originX, 21, 3-originZ) != 15 {
 		t.Fatal("lighting not rebuilt after load")
 	}
 	q := g2.Player

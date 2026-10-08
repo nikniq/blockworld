@@ -111,7 +111,7 @@ block textures and sound effects are generated at startup.
   from hostiles. Health regenerates slowly out of combat. Falls hurt; water breaks the fall and you can swim.
 - Sneak to move slowly without falling off edges. Sprint for speed.
 - **Lighting**: sunlight and block light propagate through the world, so caves and sealed rooms are
-  pitch black and nights are dim. Craft **torches** (coal ore + planks) and place them anywhere to light
+  pitch black and nights are dim. You start with forty **torches**; craft more (coal ore + planks) and place them anywhere to light
   your mine or base. Hostiles and dropped items are lit by the cell they stand in.
 - Textured blocks with ambient occlusion and smooth lighting, fog, drifting clouds, stars and a sun and moon.
   The scene is anti-aliased with an FXAA pass and finished with a soft vignette (A on the pause screen

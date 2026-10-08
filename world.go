@@ -208,7 +208,7 @@ var blocks = [numBlocks]blockInfo{
 	GoldBlock: {Name: "Gold Block", Top: col(248, 210, 60), Side: col(244, 200, 52), Bottom: col(236, 190, 48),
 		Pat: [3]texPattern{PatGold, PatGold, PatGold}, MineTime: 4.5, Hard: true, Drops: GoldBlock, Solid: true},
 	Torch: {Name: "Torch", Top: col(255, 200, 60), Side: col(110, 80, 40), Bottom: col(90, 65, 30),
-		Pat: [3]texPattern{PatSand, PatTorch, PatNoise}, MineTime: 0.05, Drops: Torch, Tiny: true, Emit: 14},
+		Pat: [3]texPattern{PatSand, PatTorch, PatNoise}, MineTime: 0.05, Drops: Torch, Tiny: true, Emit: 15},
 	TNT: {Name: "TNT", Top: col(200, 50, 40), Side: col(200, 50, 40), Bottom: col(200, 50, 40),
 		Pat: [3]texPattern{PatTNTTop, PatTNT, PatTNTTop}, MineTime: 0.3, Drops: TNT, Solid: true},
 	Meat: {Name: "Raw Meat", Top: col(215, 90, 90), Side: col(215, 90, 90), Bottom: col(215, 90, 90),
@@ -1774,8 +1774,8 @@ void main() {
     // Faces turned toward the sun catch more of it; the effect follows the sun through the day.
     float facing = 0.88 + 0.24 * max(dot(normalize(fragNormal), sunDir), 0.0);
     float bs = 0.03 + 0.97 * sun * sun * facing;
-    float bb = 0.97 * blk * blk;
-    vec3 torchTint = vec3(1.0, 0.82, 0.58);
+    float bb = 0.97 * pow(blk, 1.4); // torchlight falls off more gently than sunlight
+    vec3 torchTint = vec3(1.15, 0.98, 0.72); // warm and a touch over-bright up close
     vec3 lit = max(sunTint * bs, torchTint * bb);
     vec3 rgb = t.rgb * fragColor.b * colDiffuse.b * lit;
     if (water > 0.5) {
