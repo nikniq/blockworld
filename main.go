@@ -3228,6 +3228,33 @@ func (g *Game) scriptedShots(frame int) bool {
 			g.Player.MineT = g.Player.MineTime(g.World.Get(a.X, a.Y, a.Z)) * 0.6
 		}
 		rl.TakeScreenshot("shot_day.png")
+	case 232:
+		// Close-up in the open spawn clearing: villager, tamed cat and wolf facing the camera.
+		p := g.Player
+		p.Pos = g.Spawn
+		p.Yaw = 0 // face +Z
+		p.Pitch = 0.0
+		settings.Creative, p.Flying = false, false
+		fwd := rl.NewVector3(0, 0, 1)
+		right := rl.NewVector3(-1, 0, 0)
+		mk := func(k AnimalKind, dist, side float32) *Animal {
+			q := rl.Vector3Add(g.Spawn, rl.Vector3Add(rl.Vector3Scale(fwd, dist), rl.Vector3Scale(right, side)))
+			q.Y = float32(g.World.SurfaceY(floorI(q.X), floorI(q.Z)))
+			a := NewAnimal(q, k)
+			a.Heading = rl.NewVector3(0, 0, -1)
+			a.WanderT = 99
+			a.Walking = false
+			g.Animals = append(g.Animals, a)
+			return a
+		}
+		v := mk(AnimalVillager, 2.6, 0)
+		v.Prof, v.Name = ProfGuard, "Rosa"
+		c := mk(AnimalCat, 2.0, 1.1)
+		c.Tamed, c.Sitting, c.Coat = true, true, 1
+		wf := mk(AnimalWolf, 2.4, -1.3)
+		wf.Tamed = true
+	case 234:
+		rl.TakeScreenshot("shot_closeup.png")
 	case 235:
 		g.Asteroid = Asteroid{Target: rl.Vector3Add(g.Player.Pos, rl.NewVector3(20, 0, -20)), T: 6, Active: true}
 		g.Player.Pitch = 0.35

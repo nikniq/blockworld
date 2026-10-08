@@ -62,7 +62,12 @@ const (
 )
 
 // Face order for painting: top, bottom, left (+X), right (-X), front (+Z), back (-Z).
-const skinTiles = 32 // tiles per atlas row
+const (
+	skinTiles = 32 // tiles per atlas row
+	skinRes   = 64 // pixels per face: four times the block texture resolution
+	skinPad   = 8  // repeated edge pixels around each tile so mipmaps never bleed
+	skinCell  = skinRes + 2*skinPad
+)
 
 func skinTile(kind SkinKind, part, face int) int { return (int(kind)*numParts+part)*6 + face }
 
@@ -74,10 +79,10 @@ var skinRows = ((int(numSkins)+1)*numParts*6 + skinTiles - 1) / skinTiles
 
 func skinUV(kind SkinKind, part, face int) (u0, v0, u1, v1 float32) {
 	i := skinTile(kind, part, face)
-	tx, ty := float32(i%skinTiles), float32(i/skinTiles)
-	aw, ah := float32(skinTiles*tileSize), float32(skinRows*tileSize)
+	tx, ty := float32(i%skinTiles)*skinCell+skinPad, float32(i/skinTiles)*skinCell+skinPad
+	aw, ah := float32(skinTiles*skinCell), float32(skinRows*skinCell)
 	const inset = 0.05
-	return (tx*tileSize + inset) / aw, (ty*tileSize + inset) / ah, ((tx+1)*tileSize - inset) / aw, ((ty+1)*tileSize - inset) / ah
+	return (tx + inset) / aw, (ty + inset) / ah, (tx + skinRes - inset) / aw, (ty + skinRes - inset) / ah
 }
 
 // faceIndexOf maps a faceDef to the painting face order.
@@ -494,16 +499,125 @@ func paintSkin(kind SkinKind, part, face, x, y int) rl.Color {
 	return shade(col(200, 200, 200))
 }
 
+// material classes drive the fine detail layered over the 16x16 design.
+type material int
+
+const (
+	matSkin material = iota
+	matCloth
+	matFur
+	matBone
+	matScale
+	matMetal
+	matFlat
+)
+
+func materialOf(kind SkinKind, part int) material {
+	switch kind {
+	case SkinPlayer, SkinZombie, SkinBrute, SkinTrader, SkinFarmer, SkinLibrarian:
+		if part == PartHead || part == PartArmL || part == PartArmR {
+			return matSkin
+		}
+		return matCloth
+	case SkinGuard:
+		if part == PartHead {
+			return matSkin
+		}
+		return matMetal
+	case SkinSkeleton:
+		return matBone
+	case SkinCreeper, SkinCroc, SkinDino, SkinRaptor, SkinBronto:
+		return matScale
+	case SkinSpider, SkinPig, SkinCow, SkinSheep, SkinWolf, SkinCat, SkinCatBlack, SkinCatTabby, SkinKangaroo, SkinEmu, SkinKoala, SkinWombat, SkinPlatypus:
+		return matFur
+	}
+	return matFlat
+}
+
+func lum(c rl.Color) int { return (int(c.R)*299 + int(c.G)*587 + int(c.B)*114) / 1000 }
+
+// paintSkinHi renders one high-resolution texel: the 16x16 design decides the
+// shape and colour, then material grain, fur, weave, edge shading and eye
+// highlights are layered on at 64x64.
+func paintSkinHi(kind SkinKind, part, face, x, y int) rl.Color {
+	cx, cy := x/4, y/4
+	base := paintSkin(kind, part, face, cx, cy)
+	if base.A == 0 || kind == skinCracks {
+		return base
+	}
+	seed := 700 + int(kind)*131 + part*17 + face
+	n := hash2(x, y, seed)
+	v := float32(1)
+	switch materialOf(kind, part) {
+	case matSkin:
+		v = 0.97 + 0.06*n
+		// Soft shading toward the sides of the face.
+		v *= 0.94 + 0.06*float32(math.Sin(float64(x)/float64(skinRes)*math.Pi))
+	case matCloth:
+		weave := float32(0)
+		if (x+y)%2 == 0 {
+			weave = 0.03
+		}
+		v = 0.95 + 0.06*n + weave
+		if cx > 0 && paintSkin(kind, part, face, cx-1, cy) != base || cy > 0 && paintSkin(kind, part, face, cx, cy-1) != base {
+			v *= 0.9 // seams where the design changes colour
+		}
+	case matFur:
+		// Strands running down the body, lighter at the tips.
+		strand := hash2(x, y/5, seed+1)
+		v = 0.85 + 0.25*strand + 0.06*n
+		if y%5 == 0 {
+			v += 0.05
+		}
+	case matBone:
+		v = 0.93 + 0.1*n
+		if hash2(x/3, y/3, seed+2) < 0.08 {
+			v *= 0.85 // pitting
+		}
+	case matScale:
+		sx, sy := x%6, (y+(x/6%2)*3)%6
+		if sx == 0 || sy == 0 {
+			v = 0.82 // scale outlines
+		} else {
+			v = 0.95 + 0.1*n + 0.05*float32(sy)/6
+		}
+	case matMetal:
+		v = 0.9 + 0.2*float32(math.Sin(float64(x+y)*0.4))*0.3 + 0.05*n
+		if (x/4+y/4)%2 == 0 && part != PartHead {
+			v *= 0.94 // rings of mail
+		}
+	default:
+		v = 0.97 + 0.06*n
+	}
+	// Darken toward the edges of each box face so parts read as separate volumes.
+	d := min(min(x, y), min(skinRes-1-x, skinRes-1-y))
+	if d < 5 {
+		v *= 0.86 + 0.028*float32(d)
+	}
+	c := mul(base, v)
+	// Eye highlight: a dark iris cell beside a pale cell gets a glint at its top corner.
+	if lum(base) < 70 {
+		left := paintSkin(kind, part, face, max(cx-1, 0), cy)
+		right := paintSkin(kind, part, face, min(cx+1, 15), cy)
+		if (lum(left) > 200 || lum(right) > 200) && x%4 <= 1 && y%4 == 0 {
+			return rl.NewColor(255, 255, 255, 255)
+		}
+	}
+	return c
+}
+
 func buildSkinAtlas() *image.RGBA {
-	img := image.NewRGBA(image.Rect(0, 0, skinTiles*tileSize, skinRows*tileSize))
+	img := image.NewRGBA(image.Rect(0, 0, skinTiles*skinCell, skinRows*skinCell))
 	for kind := SkinKind(0); kind <= numSkins; kind++ {
 		for part := 0; part < numParts; part++ {
 			for face := 0; face < 6; face++ {
 				i := skinTile(kind, part, face)
-				ox, oy := (i%skinTiles)*tileSize, (i/skinTiles)*tileSize
-				for y := 0; y < tileSize; y++ {
-					for x := 0; x < tileSize; x++ {
-						c := paintSkin(kind, part, face, x, y)
+				ox, oy := (i%skinTiles)*skinCell, (i/skinTiles)*skinCell
+				for y := 0; y < skinCell; y++ {
+					for x := 0; x < skinCell; x++ {
+						px := min(max(x-skinPad, 0), skinRes-1)
+						py := min(max(y-skinPad, 0), skinRes-1)
+						c := paintSkinHi(kind, part, face, px, py)
 						img.SetRGBA(ox+x, oy+y, color.RGBA{c.R, c.G, c.B, c.A})
 					}
 				}
@@ -536,7 +650,9 @@ func (s *Skins) init(w *World) {
 	img := rl.NewImageFromImage(buildSkinAtlas())
 	s.tex = rl.LoadTextureFromImage(img)
 	rl.UnloadImage(img)
-	rl.SetTextureFilter(s.tex, rl.FilterPoint)
+	rl.GenTextureMipmaps(&s.tex)
+	rl.TextureParameters(s.tex.ID, rl.TextureMinFilter, rl.TextureFilterNearestMipLinear)
+	rl.TextureParameters(s.tex.ID, rl.TextureMagFilter, 0x2600)
 	s.mat = rl.LoadMaterialDefault()
 	s.mat.GetMap(rl.MapDiffuse).Texture = s.tex
 	if w.shaderOK {
