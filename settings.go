@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -25,6 +26,28 @@ type Settings struct {
 	Antialias   bool
 	WorldSize   int // footprint of newly generated worlds
 	Mode        int // ModeSurvival, ModeCreative, ModeZombie, ModeBattle
+	Quality     int // 0 low, 1 medium, 2 high (-1: not chosen yet)
+}
+
+var qualityNames = [...]string{"Low", "Medium", "High"}
+
+// qualityParams are the knobs each quality level turns.
+type qualityParams struct {
+	FogEnd      float32 // draw distance in blocks
+	RenderScale float32 // framebuffer fraction the 3D scene is rendered at
+	EntityDist  float32 // creatures beyond this are not drawn
+	Builds      int     // chunk meshes built per frame
+	Clouds      bool
+}
+
+func quality() qualityParams {
+	switch settings.Quality {
+	case 0:
+		return qualityParams{FogEnd: 80, RenderScale: 0.5, EntityDist: 48, Builds: 1, Clouds: false}
+	case 1:
+		return qualityParams{FogEnd: 120, RenderScale: 0.75, EntityDist: 80, Builds: 2, Clouds: true}
+	}
+	return qualityParams{FogEnd: 190, RenderScale: 1, EntityDist: 160, Builds: 4, Clouds: true}
 }
 
 const (
@@ -109,6 +132,10 @@ func loadSettings() Settings {
 			if n, err := strconv.Atoi(v); err == nil {
 				s.Mode = n
 			}
+		case "quality":
+			if n, err := strconv.Atoi(v); err == nil && n >= 0 && n <= 2 {
+				s.Quality = n
+			}
 		case "music":
 			s.Music = v == "true"
 		case "antialias":
@@ -127,6 +154,13 @@ func loadSettings() Settings {
 		s.Mode = ModeCreative // older settings files
 	}
 	s.applyMode()
+	if s.Quality < 0 {
+		// First run: integrated graphics are common on Linux and Windows laptops.
+		s.Quality = 2
+		if runtime.GOOS != "darwin" {
+			s.Quality = 1
+		}
+	}
 	return s
 }
 
@@ -138,7 +172,7 @@ func (s Settings) save() {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return
 	}
-	text := fmt.Sprintf("sensitivity=%.2f\nvolume=%.2f\ninvert_y=%t\nfullscreen=%t\nswap_buttons=%t\ndifficulty=%d\nlast_join=%s\nname=%s\ncreative=%t\nmusic=%t\nantialias=%t\nworld_size=%d\nmode=%d\n", s.Sensitivity, s.Volume, s.InvertY, s.Fullscreen, s.SwapButtons, s.Difficulty, s.LastJoin, s.Name, s.Creative, s.Music, s.Antialias, s.WorldSize, s.Mode)
+	text := fmt.Sprintf("sensitivity=%.2f\nvolume=%.2f\ninvert_y=%t\nfullscreen=%t\nswap_buttons=%t\ndifficulty=%d\nlast_join=%s\nname=%s\ncreative=%t\nmusic=%t\nantialias=%t\nworld_size=%d\nmode=%d\nquality=%d\n", s.Sensitivity, s.Volume, s.InvertY, s.Fullscreen, s.SwapButtons, s.Difficulty, s.LastJoin, s.Name, s.Creative, s.Music, s.Antialias, s.WorldSize, s.Mode, s.Quality)
 	_ = os.WriteFile(p, []byte(text), 0o644)
 }
 

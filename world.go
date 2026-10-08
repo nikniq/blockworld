@@ -1953,9 +1953,23 @@ func (w *World) EndShader() {
 
 // visibleChunks walks the chunks, each shifted by whole worlds so it sits as
 // close to the camera as possible: that is what makes the wrap seamless.
+// Per-frame render statistics for the debug overlay.
+var renderStats struct {
+	Chunks, Verts, Pending int
+}
+
+// visibleChunks walks the chunks in view, building at most a few dirty ones
+// per frame (nearest first) so a new area streams in without a stall.
 func (w *World) visibleChunks(cam rl.Camera3D, fn func(c *chunk, m rl.Matrix)) {
 	w.flushLight()
 	fwd := rl.Vector3Normalize(rl.Vector3Subtract(cam.Target, cam.Position))
+	type cand struct {
+		c      *chunk
+		ci, cj int
+		ox, oz float32
+		d2     float32
+	}
+	var ready, dirty []cand
 	for cj := 0; cj < w.ncz; cj++ {
 		for ci := 0; ci < w.ncx; ci++ {
 			c := w.chunks[cj*w.ncx+ci]
@@ -1965,19 +1979,41 @@ func (w *World) visibleChunks(cam rl.Camera3D, fn func(c *chunk, m rl.Matrix)) {
 			if rl.Vector3DotProduct(rl.Vector3Subtract(near, cam.Position), fwd) < -28 {
 				continue
 			}
+			dx, dz := near.X-cam.Position.X, near.Z-cam.Position.Z
+			d2 := dx*dx + dz*dz
 			// Nothing beyond the fog is visible: skip (and never even build) those chunks.
-			if limit := w.envFogEnd + chunkSize; limit > 0 {
-				dx, dz := near.X-cam.Position.X, near.Z-cam.Position.Z
-				if dx*dx+dz*dz > limit*limit {
-					continue
-				}
+			if limit := w.envFogEnd + chunkSize; limit > 0 && d2 > limit*limit {
+				continue
 			}
+			k := cand{c, ci, cj, ox, oz, d2}
 			if c.dirty {
-				w.buildChunk(ci, cj, c)
-				c.dirty = false
+				dirty = append(dirty, k)
+			} else {
+				ready = append(ready, k)
 			}
-			fn(c, rl.MatrixTranslate(ox, 0, oz))
 		}
+	}
+	// Build the nearest dirty chunks within this frame's budget.
+	budget := quality().Builds
+	for i := 0; i < len(dirty) && i < budget; i++ {
+		best := i
+		for j := i + 1; j < len(dirty); j++ {
+			if dirty[j].d2 < dirty[best].d2 {
+				best = j
+			}
+		}
+		dirty[i], dirty[best] = dirty[best], dirty[i]
+		k := dirty[i]
+		w.buildChunk(k.ci, k.cj, k.c)
+		k.c.dirty = false
+		ready = append(ready, k)
+	}
+	renderStats.Pending = max(0, len(dirty)-budget)
+	renderStats.Chunks, renderStats.Verts = 0, 0
+	for _, k := range ready {
+		renderStats.Chunks++
+		renderStats.Verts += int(k.c.opaque.mesh.VertexCount) + int(k.c.trans.mesh.VertexCount)
+		fn(k.c, rl.MatrixTranslate(k.ox, 0, k.oz))
 	}
 }
 

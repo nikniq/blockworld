@@ -78,7 +78,8 @@ var postfx PostFX
 // begin starts rendering the scene into the offscreen target (recreated on resize).
 func (p *PostFX) begin() bool {
 	// The target matches the framebuffer, which is larger than the logical window on scaled displays.
-	sw, sh := int32(rl.GetRenderWidth()), int32(rl.GetRenderHeight())
+	scale := quality().RenderScale
+	sw, sh := int32(float32(rl.GetRenderWidth())*scale), int32(float32(rl.GetRenderHeight())*scale)
 	if sw <= 0 || sh <= 0 {
 		return false
 	}

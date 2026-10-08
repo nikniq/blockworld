@@ -126,7 +126,8 @@ func (s *Sky) SunTint() [3]float32 {
 // Env builds the shader environment for the frame.
 func (s *Sky) Env(underwater bool, t float32) Env {
 	flicker := 1 + 0.05*float32(math.Sin(float64(t*9))) + 0.03*float32(math.Sin(float64(t*23.7)))
-	env := Env{Light: s.Light(), Fog: s.Color(), FogStart: 90 - 40*s.Rain, FogEnd: 190 - 80*s.Rain, SunTint: s.SunTint(), SunDir: s.SunDir(), Flicker: flicker, Time: t}
+	fe := quality().FogEnd
+	env := Env{Light: s.Light(), Fog: s.Color(), FogStart: fe*0.47 - fe*0.2*s.Rain, FogEnd: fe - fe*0.42*s.Rain, SunTint: s.SunTint(), SunDir: s.SunDir(), Flicker: flicker, Time: t}
 	if underwater {
 		env.Fog = rl.NewColor(16, 50, 110, 255)
 		env.FogStart, env.FogEnd = 1, 22

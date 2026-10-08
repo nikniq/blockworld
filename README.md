@@ -255,6 +255,14 @@ go build -ldflags="-H windowsgui" -o blockworld.exe .
 
 A `Makefile` with `run`, `build`, `build-macos`, `build-linux` and `build-windows` targets is included.
 
+### If it runs slowly
+
+Press Esc and use **V** to switch graphics quality. Low renders the scene at half the window's pixel
+size, draws 80 blocks out, skips clouds and keeps distant creatures off screen; Medium is the default
+on Linux and Windows; High is the default on macOS. Chunk meshes now stream in a few per frame rather
+than all at once. **F3** shows an overlay with the frame rate, chunks and vertices drawn, framebuffer
+size and quality, which is useful when reporting a slow machine.
+
 ### Packaging as an app with an icon
 
 The quickest way is the packaging script, which checks the toolchain, generates the icon, runs the

@@ -133,6 +133,7 @@ type Game struct {
 	MinedCount     int
 	PlacedCount    int
 	ShowAch        bool
+	ShowDebug      bool
 	lastLogged     string
 	Chat           []ChatLine
 	ChatText       string
@@ -1521,6 +1522,9 @@ func (g *Game) update(dt float32) {
 	if rl.IsKeyPressed(rl.KeyK) && !g.Chatting {
 		g.ShowAch = !g.ShowAch
 	}
+	if rl.IsKeyPressed(rl.KeyF3) {
+		g.ShowDebug = !g.ShowDebug
+	}
 	g.checkAchievements()
 	g.updateToasts(dt)
 	g.spawnEmbers()
@@ -1899,11 +1903,18 @@ func (g *Game) draw3D() {
 	restore := g.bringNear(cam.Position)
 	defer restore()
 	w.BeginShader()
+	ed := quality().EntityDist
 	for _, e := range g.Enemies {
+		if rl.Vector3Distance(e.Pos, cam.Position) > ed {
+			continue
+		}
 		e.Lum = w.Luminance(rl.NewVector3(e.Pos.X, e.Pos.Y+0.5, e.Pos.Z), env.Light)
 		e.Draw(w)
 	}
 	for _, a := range g.Animals {
+		if rl.Vector3Distance(a.Pos, cam.Position) > ed {
+			continue
+		}
 		a.Lum = w.Luminance(rl.NewVector3(a.Pos.X, a.Pos.Y+0.5, a.Pos.Z), env.Light)
 		a.Draw(w)
 	}
@@ -1927,7 +1938,9 @@ func (g *Game) draw3D() {
 			rl.DrawCube(rl.NewVector3(t.Pos.X, t.Pos.Y+0.5, t.Pos.Z), 1.02, 1.02, 1.02, rl.NewColor(255, 255, 255, 170))
 		}
 	}
-	g.Sky.DrawClouds(cam, float32(rl.GetTime()))
+	if quality().Clouds {
+		g.Sky.DrawClouds(cam, float32(rl.GetTime()))
+	}
 	w.EndShader()
 	if !p.HeadWater && w.SkyExposed(p.Eye()) {
 		top := w.Get(floorI(p.Pos.X), w.SurfaceY(floorI(p.Pos.X), floorI(p.Pos.Z))-1, floorI(p.Pos.Z))
@@ -2688,6 +2701,17 @@ func (g *Game) drawHUD() {
 		rl.DrawText("H help   M map", sw-120, sh-24, 14, rl.LightGray)
 	}
 	rl.DrawFPS(sw-90, 20)
+	if g.ShowDebug {
+		lines := []string{
+			fmt.Sprintf("quality %s   render scale %.2f   fog %.0f", qualityNames[settings.Quality], quality().RenderScale, quality().FogEnd),
+			fmt.Sprintf("chunks drawn %d   pending builds %d   vertices %dk", renderStats.Chunks, renderStats.Pending, renderStats.Verts/1000),
+			fmt.Sprintf("entities %d hostiles, %d animals, %d drops   window %dx%d, framebuffer %dx%d", len(g.Enemies), len(g.Animals), len(g.Drops), rl.GetScreenWidth(), rl.GetScreenHeight(), rl.GetRenderWidth(), rl.GetRenderHeight()),
+			fmt.Sprintf("world %dx%d   pos %d %d %d", worldW, worldD, floorI(p.Pos.X), floorI(p.Pos.Y), floorI(p.Pos.Z)),
+		}
+		for i, l := range lines {
+			rl.DrawText(l, sw-20-rl.MeasureText(l, 14), 46+int32(i)*18, 14, rl.NewColor(200, 255, 200, 255))
+		}
+	}
 }
 
 // drawFullMap shows the whole world map with everything marked.
@@ -2897,6 +2921,8 @@ func (g *Game) updateSettings() {
 		settings.Difficulty = (settings.Difficulty + 1) % 3
 	case rl.IsKeyPressed(rl.KeyA):
 		settings.Antialias = !settings.Antialias
+	case rl.IsKeyPressed(rl.KeyV):
+		settings.Quality = (settings.Quality + 1) % 3
 	case rl.IsKeyPressed(rl.KeyN):
 		settings.Music = !settings.Music
 		if !settings.Music && g.Audio.ok {
@@ -3004,7 +3030,7 @@ func (g *Game) drawOverlay() {
 		if settings.Antialias {
 			aa = "on"
 		}
-		centered(fmt.Sprintf("N  music  %s      A  anti-aliasing  %s      K (in game)  achievements %d/%d", music, aa, g.achievementCount(), int(numAch)), sh/2+226, 20, rl.White)
+		centered(fmt.Sprintf("N  music  %s      A  anti-aliasing  %s      V  graphics quality  %s      K (in game)  achievements %d/%d", music, aa, qualityNames[settings.Quality], g.achievementCount(), int(numAch)), sh/2+226, 20, rl.White)
 	case StateGameOver:
 		centered("YOU DIED", sh/2-120, 64, rl.Red)
 		if g.Player.Cause != "" {
@@ -3818,7 +3844,7 @@ func main() {
 		g.updateMusic()
 
 		rl.BeginDrawing()
-		usePost := settings.Antialias && postfx.begin()
+		usePost := (settings.Antialias || quality().RenderScale < 1) && postfx.begin()
 		rl.ClearBackground(g.Sky.Color())
 		g.draw3D()
 		if usePost {
