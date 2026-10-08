@@ -3151,7 +3151,7 @@ func (g *Game) scriptedShots(frame int) bool {
 			t.WanderT = 99
 			g.Animals = append(g.Animals, t)
 		}
-		for i, k := range []AnimalKind{AnimalRaptor, AnimalCompy, AnimalKangaroo, AnimalEmu, AnimalDino, AnimalBronto} {
+		for i, k := range []AnimalKind{AnimalCat, AnimalRaptor, AnimalKangaroo, AnimalEmu, AnimalDino, AnimalBronto} {
 			p := rl.Vector3Add(g.Player.Pos, rl.Vector3Scale(g.Player.FlatForward(), 4+float32(i)*1.5))
 			p.X += float32(i)*2.5 - 6
 			if k == AnimalBronto {
@@ -3166,10 +3166,21 @@ func (g *Game) scriptedShots(frame int) bool {
 			a := NewAnimal(p, k)
 			a.Heading = rl.Vector3Scale(g.Player.FlatForward(), -1) // face the camera
 			a.WanderT = 99
+			if k == AnimalCat {
+				a.Tamed, a.Coat = true, 2
+			}
 			g.Animals = append(g.Animals, a)
 		}
 	case 200:
+		// Hover above the line-up so every creature is in frame.
+		settings.Creative, g.Player.Flying = true, true
+		g.Player.Pos = rl.Vector3Add(g.Spawn, rl.NewVector3(0, 4, -4))
+		g.Player.Pitch = -0.35
+		g.Player.Yaw = math.Pi
+	case 203:
 		rl.TakeScreenshot("shot_sky.png")
+		settings.Creative, g.Player.Flying = false, false
+		g.Player.Pos = g.Spawn
 	case 205:
 		// Hover near the beacon tower and look at it.
 		p := g.Player
