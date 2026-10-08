@@ -141,7 +141,8 @@ A **dedicated server** runs without a window, for example on a Linux box or a sp
 ```
 
 It loads the saved world (or generates one), auto-saves every two minutes, prints joins, chat and
-day/night events, and saves on Ctrl+C. While online, **T** opens chat and holding **P** lists players.
+day/night events, and saves on Ctrl+C. While online, **T** or **Enter** opens chat (Enter sends, Esc cancels; gameplay keys are ignored while
+typing) and holding **P** lists players. Joins and departures appear in the chat log.
 
 Open port 7777 (TCP) on the host's firewall for LAN play, and UDP 7778 if you want it discovered. Over the internet, forward the port on the
 host's router or use a tunnel such as Tailscale. Only the host can save and sleep through the night;

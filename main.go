@@ -1251,20 +1251,23 @@ func (g *Game) update(dt float32) {
 	if p.Stepped {
 		g.Audio.Play(g.Audio.Steps[stepKind(g.World.Get(floorI(p.Pos.X), floorI(p.Pos.Y)-1, floorI(p.Pos.Z)))], 0.5)
 	}
-	if rl.IsKeyPressed(rl.KeyF5) {
-		g.ThirdPerson = !g.ThirdPerson
+	if !g.Chatting {
+		if rl.IsKeyPressed(rl.KeyF5) {
+			g.ThirdPerson = !g.ThirdPerson
+		}
+		if rl.IsKeyPressed(rl.KeyH) {
+			g.ShowHelp = !g.ShowHelp
+		}
+		if rl.IsKeyPressed(rl.KeyM) {
+			g.ShowMap = !g.ShowMap
+		}
 	}
-	if rl.IsKeyPressed(rl.KeyH) {
-		g.ShowHelp = !g.ShowHelp
-	}
-	if rl.IsKeyPressed(rl.KeyM) {
-		g.ShowMap = !g.ShowMap
-	}
-	if rl.IsKeyPressed(rl.KeyT) && g.Net != nil {
+	if (rl.IsKeyPressed(rl.KeyT) || rl.IsKeyPressed(rl.KeyEnter)) && g.Net != nil && !g.Chatting {
 		g.Chatting = true
+		typing = true
 		g.ChatText = ""
 	}
-	if rl.IsKeyPressed(rl.KeyK) {
+	if rl.IsKeyPressed(rl.KeyK) && !g.Chatting {
 		g.ShowAch = !g.ShowAch
 	}
 	g.checkAchievements()
@@ -2096,6 +2099,9 @@ func (g *Game) drawHUD() {
 	if g.Net != nil || len(g.Chat) > 0 {
 		g.drawChat(sw, sh)
 	}
+	if g.Net != nil && !g.Chatting {
+		rl.DrawText("T or ENTER: chat    P: players", 22, sh-110, 14, rl.NewColor(200, 200, 210, 160))
+	}
 	if g.Net != nil && rl.IsKeyDown(rl.KeyP) {
 		g.drawPlayerList(sw, sh)
 	}
@@ -2409,8 +2415,14 @@ func (g *Game) netTestStep(role string, frame int) bool {
 				g.Enemies = append(g.Enemies, NewEnemy(q, KindCreeper, 1))
 			}
 		}
+		if frame == 600 {
+			g.sendChat("welcome from host")
+		}
 		if frame == 1500 {
-			rl.TraceLog(rl.LogInfo, "NETTEST host: players=%d remotes=%d", g.Net.PlayerCount(), len(g.Remotes))
+			rl.TraceLog(rl.LogInfo, "NETTEST host: players=%d remotes=%d chat=%d", g.Net.PlayerCount(), len(g.Remotes), len(g.Chat))
+			for _, c := range g.Chat {
+				rl.TraceLog(rl.LogInfo, "NETTEST host chat: <%s> %s", c.From, c.Text)
+			}
 			return true
 		}
 		return false
@@ -2424,14 +2436,20 @@ func (g *Game) netTestStep(role string, frame int) bool {
 			g.netTestCell = [3]int{a.X, a.Y, a.Z}
 			g.netTestWas = w.Get(a.X, a.Y, a.Z)
 		}
-		g.sendToHost(&Msg{Text: &struct{ Text string }{"hello from client"}})
+		g.sendChat("hello from client")
 	}
 	if frame == 500 {
 		c := g.netTestCell
 		changed := w.Get(c[0], c[1], c[2]) != g.netTestWas
-		ok := g.Net != nil && g.Net.Snaps > 40 && g.Net.Blocks > 0 && len(g.Remotes) == 1 && changed && len(g.Enemies) > 0
-		rl.TraceLog(rl.LogInfo, "NETTEST client: ok=%v snaps=%d blocks=%d remotes=%d mined=%v enemies=%d drops=%d",
-			ok, g.Net.Snaps, g.Net.Blocks, len(g.Remotes), changed, len(g.Enemies), len(g.Drops))
+		gotHost := false
+		for _, c := range g.Chat {
+			if c.Text == "welcome from host" {
+				gotHost = true
+			}
+		}
+		ok := g.Net != nil && g.Net.Snaps > 40 && g.Net.Blocks > 0 && len(g.Remotes) == 1 && changed && len(g.Enemies) > 0 && gotHost
+		rl.TraceLog(rl.LogInfo, "NETTEST client: ok=%v snaps=%d blocks=%d remotes=%d mined=%v enemies=%d drops=%d chatFromHost=%v chatLines=%d",
+			ok, g.Net.Snaps, g.Net.Blocks, len(g.Remotes), changed, len(g.Enemies), len(g.Drops), gotHost, len(g.Chat))
 		return true
 	}
 	return false
@@ -2449,9 +2467,11 @@ func (g *Game) updateChat() {
 	}
 	if rl.IsKeyPressed(rl.KeyEscape) {
 		g.Chatting = false
+		typing = false
 	}
 	if rl.IsKeyPressed(rl.KeyEnter) {
 		g.Chatting = false
+		typing = false
 		text := strings.TrimSpace(g.ChatText)
 		if text != "" {
 			g.sendChat(text)

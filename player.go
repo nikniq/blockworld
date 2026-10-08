@@ -289,7 +289,11 @@ func (p *Player) Update(dt float32, w *World) {
 	}
 	p.Pitch = clamp(p.Pitch, -1.55, 1.55)
 
-	// Hotbar selection.
+	// Hotbar selection (not while typing in chat).
+	if typing {
+		p.EnsureHeld()
+		return
+	}
 	for i, k := range []int32{rl.KeyOne, rl.KeyTwo, rl.KeyThree, rl.KeyFour, rl.KeyFive, rl.KeySix, rl.KeySeven, rl.KeyEight, rl.KeyNine} {
 		if rl.IsKeyPressed(k) {
 			if idx := p.HotScroll + i; idx < len(p.Hotbar()) {
@@ -639,3 +643,6 @@ func lerp(a, b, t float32) float32 {
 	}
 	return a + (b-a)*t
 }
+
+// typing is set while the chat line has the keyboard, so letters do not act as controls.
+var typing bool
