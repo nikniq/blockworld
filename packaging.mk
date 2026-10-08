@@ -34,6 +34,7 @@ app-macos: icon.png
 	  '  <key>NSHighResolutionCapable</key><true/>' \
 	  '  <key>LSMinimumSystemVersion</key><string>11.0</string>' \
 	  '</dict></plist>' > $(BUNDLE)/Contents/Info.plist
+	codesign --force --deep --sign - $(BUNDLE)
 	@echo "Built $(BUNDLE)"
 
 # Linux: install the binary, icon and a desktop launcher for the current user.

@@ -9,6 +9,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -2872,7 +2873,8 @@ func main() {
 		os.Exit(1)
 	}
 	defer rl.CloseWindow()
-	if icon := rl.LoadImageFromMemory(".png", iconPNG, int32(len(iconPNG))); icon != nil && icon.Width > 0 {
+	// Window icon for Linux and Windows title bars; macOS takes it from the app bundle instead.
+	if icon := rl.LoadImageFromMemory(".png", iconPNG, int32(len(iconPNG))); runtime.GOOS != "darwin" && icon != nil && icon.Width > 0 {
 		small := rl.ImageCopy(icon)
 		rl.ImageResize(small, 256, 256)
 		rl.SetWindowIcon(*small)
