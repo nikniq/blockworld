@@ -459,6 +459,7 @@ func (g *Game) hostHandle(from uint32, m *Msg) {
 		if r, ok := g.Remotes[from]; ok {
 			st := *m.State
 			st.ID, st.Name = from, r.Name
+			st.Pos = WrapPos(st.Pos)
 			r.PlayerState = st
 		}
 	case m.Break != nil:
@@ -552,7 +553,7 @@ func (g *Game) hostHandle(from uint32, m *Msg) {
 
 func withinReach(from rl.Vector3, x, y, z int) bool {
 	c := rl.NewVector3(float32(x)+0.5, float32(y)+0.5, float32(z)+0.5)
-	return rl.Vector3Distance(rl.Vector3Add(from, rl.NewVector3(0, eyeHeight, 0)), c) <= reachDist+1.5
+	return WrapDist(rl.Vector3Add(from, rl.NewVector3(0, eyeHeight, 0)), c) <= reachDist+1.5
 }
 
 // killEnemyFor scores a kill for a remote player.
@@ -758,10 +759,11 @@ func (g *Game) applySnapshot(s *Snapshot) {
 			e.ID = es.ID
 		}
 		e.Kind, e.Spec = es.Kind, &kinds[es.Kind]
-		e.Pos = rl.Vector3Lerp(e.Pos, es.Pos, 0.6)
-		if rl.Vector3Distance(e.Pos, es.Pos) > 2 {
+		e.Pos = rl.Vector3Add(e.Pos, rl.Vector3Scale(WrapDelta(es.Pos, e.Pos), 0.6))
+		if WrapDist(e.Pos, es.Pos) > 2 {
 			e.Pos = es.Pos
 		}
+		e.Pos = WrapPos(e.Pos)
 		e.Heading, e.HP, e.MaxHP = es.Heading, es.HP, es.MaxHP
 		e.Alive, e.DeathT, e.Fuse, e.Burning, e.HitFlash = es.Alive, es.DeathT, es.Fuse, es.Burning, es.Flash
 		g.Enemies = append(g.Enemies, e)
@@ -777,10 +779,11 @@ func (g *Game) applySnapshot(s *Snapshot) {
 			a = NewAnimal(as.Pos, as.Kind)
 			a.ID = as.ID
 		}
-		a.Pos = rl.Vector3Lerp(a.Pos, as.Pos, 0.6)
-		if rl.Vector3Distance(a.Pos, as.Pos) > 2 {
+		a.Pos = rl.Vector3Add(a.Pos, rl.Vector3Scale(WrapDelta(as.Pos, a.Pos), 0.6))
+		if WrapDist(a.Pos, as.Pos) > 2 {
 			a.Pos = as.Pos
 		}
+		a.Pos = WrapPos(a.Pos)
 		a.Heading, a.HP, a.Alive, a.DeathT, a.Phase = as.Heading, as.HP, as.Alive, as.DeathT, as.Phase
 		g.Animals = append(g.Animals, a)
 	}
@@ -829,9 +832,9 @@ func (g *Game) targets() []Target {
 
 func (g *Game) nearestTarget(pos rl.Vector3) Target {
 	best := g.localTarget()
-	bd := rl.Vector3Distance(pos, best.Pos)
+	bd := WrapDist(pos, best.Pos)
 	for _, t := range g.targets() {
-		if d := rl.Vector3Distance(pos, t.Pos); d < bd {
+		if d := WrapDist(pos, t.Pos); d < bd {
 			best, bd = t, d
 		}
 	}

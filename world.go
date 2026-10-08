@@ -373,12 +373,15 @@ func newEmptyWorld() *World {
 
 // ---------- lighting ----------
 
-func cellIndex(x, y, z int) int { return (y*worldD+z)*worldW + x }
+func cellIndex(x, y, z int) int { return (y*worldD+wrapZ(z))*worldW + wrapX(x) }
 
 // sunLocal and blockLocal return the two light channels of a local cell (full sun outside the volume).
 func (w *World) sunLocal(x, y, z int) int {
-	if !inLocal(x, y, z) {
+	if y >= worldH {
 		return 15
+	}
+	if y < 0 {
+		return 0
 	}
 	return int(w.Light[cellIndex(x, y, z)] >> 4)
 }
@@ -406,12 +409,18 @@ func brightness(l float32) float32 { return 0.03 + 0.97*l*l }
 // the light already present just outside the region. Chunks whose light
 // changed are marked for re-meshing.
 func (w *World) relightRegion(x0, z0, x1, z1 int) {
-	x0, z0 = max(x0, 0), max(z0, 0)
-	x1, z1 = min(x1, worldW), min(z1, worldD)
+	// Regions may run past the edges; columns wrap. A region wider than the
+	// world is the whole world.
+	if x1-x0 >= worldW {
+		x0, x1 = 0, worldW
+	}
+	if z1-z0 >= worldD {
+		z0, z1 = 0, worldD
+	}
 	if x0 >= x1 || z0 >= z1 {
 		return
 	}
-	inRegion := func(x, z int) bool { return x >= x0 && x < x1 && z >= z0 && z < z1 }
+	inRegion := func(x, z int) bool { return wrapI(x-x0, worldW) < x1-x0 && wrapI(z-z0, worldD) < z1-z0 }
 	old := make([]uint8, 0, (x1-x0)*(z1-z0)*worldH)
 	for y := 0; y < worldH; y++ {
 		for z := z0; z < z1; z++ {
@@ -438,7 +447,7 @@ func (w *World) relightRegion(x0, z0, x1, z1 int) {
 	}
 	// Light flowing in from the surrounding columns.
 	border := func(x, z int) {
-		if x < 0 || z < 0 || x >= worldW || z >= worldD {
+		if inRegion(x, z) {
 			return
 		}
 		for y := 0; y < worldH; y++ {
@@ -447,13 +456,15 @@ func (w *World) relightRegion(x0, z0, x1, z1 int) {
 			}
 		}
 	}
-	for x := x0 - 1; x <= x1; x++ {
-		border(x, z0-1)
-		border(x, z1)
-	}
-	for z := z0; z < z1; z++ {
-		border(x0-1, z)
-		border(x1, z)
+	if x1-x0 < worldW || z1-z0 < worldD {
+		for x := x0 - 1; x <= x1; x++ {
+			border(x, z0-1)
+			border(x, z1)
+		}
+		for z := z0; z < z1; z++ {
+			border(x0-1, z)
+			border(x1, z)
+		}
 	}
 	// Torches.
 	for y := 0; y < worldH; y++ {
@@ -480,7 +491,7 @@ func (w *World) relightRegion(x0, z0, x1, z1 int) {
 			continue
 		}
 		for _, d := range dirs {
-			nx, ny, nz := x+d[0], y+d[1], z+d[2]
+			nx, ny, nz := wrapX(x+d[0]), y+d[1], wrapZ(z+d[2])
 			if ny < 0 || ny >= worldH || !inRegion(nx, nz) {
 				continue
 			}
@@ -503,7 +514,7 @@ func (w *World) relightRegion(x0, z0, x1, z1 int) {
 		for z := z0; z < z1; z++ {
 			for x := x0; x < x1; x++ {
 				if old[k] != w.Light[cellIndex(x, y, z)] {
-					w.chunks[(z/chunkSize)*w.ncx+x/chunkSize].dirty = true
+					w.chunks[(wrapZ(z)/chunkSize)*w.ncx+wrapX(x)/chunkSize].dirty = true
 				}
 				k++
 			}
@@ -547,11 +558,31 @@ func vnoise(x, y float32, seed int) float32 {
 	return lerp(lerp(a, b, fx), lerp(c, d, fx), fy)
 }
 
-// vnoise3 is smooth 3D value noise in [0,1], used to carve caves.
-func vnoise3(x, y, z float32, seed int) float32 {
+func wrapI(v, period int) int { return ((v % period) + period) % period }
+
+// pnoise is vnoise whose lattice repeats every px by py cells, so terrain built
+// from it tiles seamlessly across the world's wrapped edges.
+func pnoise(x, y float32, seed, px, py int) float32 {
+	xi, yi := floorI(x), floorI(y)
+	fx, fy := smooth(x-float32(xi)), smooth(y-float32(yi))
+	h := func(dx, dy int) float32 { return hash2(wrapI(xi+dx, px), wrapI(yi+dy, py), seed) }
+	return lerp(lerp(h(0, 0), h(1, 0), fx), lerp(h(0, 1), h(1, 1), fx), fy)
+}
+
+// vnoise3 is smooth 3D value noise in [0,1], periodic in x and z every px/pz
+// lattice cells (0 means not periodic), used to carve caves.
+func vnoise3(x, y, z float32, seed int) float32 { return vnoise3p(x, y, z, seed, 0, 0) }
+
+func vnoise3p(x, y, z float32, seed, px, pz int) float32 {
 	xi, yi, zi := floorI(x), floorI(y), floorI(z)
 	fx, fy, fz := smooth(x-float32(xi)), smooth(y-float32(yi)), smooth(z-float32(zi))
-	h := func(dx, dy, dz int) float32 { return hash2(xi+dx, (yi+dy)*1013+zi+dz, seed) }
+	h := func(dx, dy, dz int) float32 {
+		ax, az := xi+dx, zi+dz
+		if px > 0 {
+			ax, az = wrapI(ax, px), wrapI(az, pz)
+		}
+		return hash2(ax, (yi+dy)*1013+az, seed)
+	}
 	c00 := lerp(h(0, 0, 0), h(1, 0, 0), fx)
 	c10 := lerp(h(0, 1, 0), h(1, 1, 0), fx)
 	c01 := lerp(h(0, 0, 1), h(1, 0, 1), fx)
@@ -561,7 +592,7 @@ func vnoise3(x, y, z float32, seed int) float32 {
 
 // biomeAt picks the biome of a local column from a slow noise field.
 func biomeAt(x, z int, seed int) Biome {
-	b := vnoise(float32(x)/45+300, float32(z)/45+300, seed+20)
+	b := pnoise(float32(x)/48, float32(z)/48, seed+20, worldW/48, worldD/48)
 	switch {
 	case b < 0.3:
 		return BiomeDesert
@@ -581,10 +612,10 @@ func (w *World) generate(seed int) {
 	for z := 0; z < worldD; z++ {
 		for x := 0; x < worldW; x++ {
 			fx, fz := float32(x), float32(z)
-			n := 0.5*vnoise(fx/40, fz/40, seed) + 0.3*vnoise(fx/14+50, fz/14+50, seed+1) +
-				0.15*vnoise(fx/6+90, fz/6+90, seed+2) + 0.05*vnoise(fx/3+130, fz/3+130, seed+3)
+			n := 0.5*pnoise(fx/48, fz/48, seed, worldW/48, worldD/48) + 0.3*pnoise(fx/16, fz/16, seed+1, worldW/16, worldD/16) +
+				0.15*pnoise(fx/6, fz/6, seed+2, worldW/6, worldD/6) + 0.05*pnoise(fx/3, fz/3, seed+3, worldW/3, worldD/3)
 			h := 5 + int(n*n*30+n*6)
-			if m := vnoise(fx/30+200, fz/30+200, seed+4); m > 0.62 {
+			if m := pnoise(fx/32, fz/32, seed+4, worldW/32, worldD/32); m > 0.62 {
 				h += int((m - 0.62) * 70)
 			}
 			// Flatten the middle so the player spawn is open and dry.
@@ -616,7 +647,7 @@ func (w *World) generate(seed int) {
 						b = Sand
 					}
 				default:
-					if vnoise3(fx/7, float32(y)/7, fz/7, seed+5) > 0.8 {
+					if vnoise3p(fx/8, float32(y)/7, fz/8, seed+5, worldW/8, worldD/8) > 0.8 {
 						b = Gravel
 					}
 				}
@@ -637,10 +668,10 @@ func (w *World) generate(seed int) {
 			}
 			for y := 2; y < top; y++ {
 				fx, fy, fz := float32(x), float32(y), float32(z)
-				a := vnoise3(fx/12, fy/9, fz/12, seed+11)
-				b := vnoise3(fx/12+70, fy/9, fz/12+70, seed+12)
+				a := vnoise3p(fx/12, fy/9, fz/12, seed+11, worldW/12, worldD/12)
+				b := vnoise3p(fx/12, fy/9, fz/12, seed+12, worldW/12, worldD/12)
 				tunnel := math.Abs(float64(a-0.5)) < 0.05 && math.Abs(float64(b-0.5)) < 0.05
-				cavern := vnoise3(fx/10+140, fy/6, fz/10+140, seed+13) > 0.76
+				cavern := vnoise3p(fx/8, fy/6, fz/8, seed+13, worldW/8, worldD/8) > 0.76
 				if tunnel || cavern {
 					w.setLocal(x, y, z, Air)
 				}
@@ -938,24 +969,72 @@ func abs(a int) int {
 
 // ---------- block access ----------
 
-func inLocal(x, y, z int) bool {
-	return x >= 0 && z >= 0 && y >= 0 && x < worldW && z < worldD && y < worldH
+// The world wraps: x and z are taken modulo the world size, so there are no
+// edges. Only y is bounded.
+func inLocal(x, y, z int) bool { return y >= 0 && y < worldH }
+
+func wrapX(x int) int { return ((x % worldW) + worldW) % worldW }
+func wrapZ(z int) int { return ((z % worldD) + worldD) % worldD }
+
+// WrapPos moves a world position into the canonical range.
+func WrapPos(p rl.Vector3) rl.Vector3 {
+	for p.X < originX {
+		p.X += worldW
+	}
+	for p.X >= originX+worldW {
+		p.X -= worldW
+	}
+	for p.Z < originZ {
+		p.Z += worldD
+	}
+	for p.Z >= originZ+worldD {
+		p.Z -= worldD
+	}
+	return p
+}
+
+// WrapDelta returns a - b along the shortest path across the wrapped world.
+func WrapDelta(a, b rl.Vector3) rl.Vector3 {
+	d := rl.Vector3Subtract(a, b)
+	for d.X > worldW/2 {
+		d.X -= worldW
+	}
+	for d.X < -worldW/2 {
+		d.X += worldW
+	}
+	for d.Z > worldD/2 {
+		d.Z -= worldD
+	}
+	for d.Z < -worldD/2 {
+		d.Z += worldD
+	}
+	return d
+}
+
+// WrapDist is the shortest distance between two positions across the wrap.
+func WrapDist(a, b rl.Vector3) float32 { return rl.Vector3Length(WrapDelta(a, b)) }
+
+// Near returns pos shifted by whole worlds so it is closest to ref (for drawing).
+func Near(pos, ref rl.Vector3) rl.Vector3 {
+	d := WrapDelta(pos, ref)
+	return rl.NewVector3(ref.X+d.X, pos.Y, ref.Z+d.Z)
 }
 
 func (w *World) getLocal(x, y, z int) Block {
 	if !inLocal(x, y, z) {
 		return Air
 	}
-	return w.Blocks[(y*worldD+z)*worldW+x]
+	return w.Blocks[(y*worldD+wrapZ(z))*worldW+wrapX(x)]
 }
 
 func (w *World) setLocal(x, y, z int, b Block) {
 	if inLocal(x, y, z) {
-		w.Blocks[(y*worldD+z)*worldW+x] = b
+		w.Blocks[(y*worldD+wrapZ(z))*worldW+wrapX(x)] = b
 	}
 }
 
 func (w *World) recomputeHeight(x, z int) {
+	x, z = wrapX(x), wrapZ(z)
 	top, ground := 0, 0
 	for y := worldH - 1; y >= 0; y-- {
 		b := w.getLocal(x, y, z)
@@ -980,7 +1059,7 @@ func (w *World) Get(x, y, z int) Block { return w.getLocal(x-originX, y, z-origi
 // InBounds reports whether world block coordinates are inside the volume.
 func (w *World) InBounds(x, y, z int) bool { return inLocal(x-originX, y, z-originZ) }
 
-// Solid is the collision query: everything below y=0 and outside X/Z bounds is a wall.
+// Solid is the collision query: everything below y=0 is a wall; x and z wrap.
 func (w *World) Solid(x, y, z int) bool {
 	if y < 0 {
 		return true
@@ -988,11 +1067,7 @@ func (w *World) Solid(x, y, z int) bool {
 	if y >= worldH {
 		return false
 	}
-	lx, lz := x-originX, z-originZ
-	if lx < 0 || lz < 0 || lx >= worldW || lz >= worldD {
-		return true
-	}
-	return blocks[w.Blocks[(y*worldD+lz)*worldW+lx]].Solid
+	return blocks[w.Blocks[(y*worldD+wrapZ(z-originZ))*worldW+wrapX(x-originX)]].Solid
 }
 
 // IsWater reports whether a world cell holds water.
@@ -1031,7 +1106,7 @@ func (w *World) BlockAt(p rl.Vector3) Block { return w.Get(floorI(p.X), floorI(p
 
 // Set changes a block, updates the column heights and marks chunk meshes dirty.
 func (w *World) Set(x, y, z int, b Block) {
-	lx, lz := x-originX, z-originZ
+	lx, lz := wrapX(x-originX), wrapZ(z-originZ)
 	if !inLocal(lx, y, lz) {
 		return
 	}
@@ -1041,12 +1116,11 @@ func (w *World) Set(x, y, z int, b Block) {
 	cx, cz := lx/chunkSize, lz/chunkSize
 	w.relight[cz*w.ncx+cx] = true
 	if w.OnSet != nil {
-		w.OnSet(x, y, z, b)
+		w.OnSet(lx+originX, y, lz+originZ, b)
 	}
 	mark := func(i, j int) {
-		if i >= 0 && j >= 0 && i < w.ncx && j < w.ncz {
-			w.chunks[j*w.ncx+i].dirty = true
-		}
+		i, j = wrapI(i, w.ncx), wrapI(j, w.ncz)
+		w.chunks[j*w.ncx+i].dirty = true
 	}
 	mark(cx, cz)
 	// Ambient occlusion reaches one block into neighbouring chunks.
@@ -1066,11 +1140,7 @@ func (w *World) Set(x, y, z int, b Block) {
 
 // SurfaceY returns the feet level of the highest solid block in a world column.
 func (w *World) SurfaceY(x, z int) int {
-	lx, lz := x-originX, z-originZ
-	if lx < 0 || lz < 0 || lx >= worldW || lz >= worldD {
-		return 0
-	}
-	return w.Ground[lz*worldW+lx]
+	return w.Ground[wrapZ(z-originZ)*worldW+wrapX(x-originX)]
 }
 
 // SkyExposed reports whether nothing opaque sits above the given world position.
@@ -1352,6 +1422,7 @@ in vec2 vertexTexCoord;
 in vec3 vertexNormal;
 in vec4 vertexColor;
 uniform mat4 mvp;
+uniform mat4 matModel;
 out vec2 fragTexCoord;
 out vec4 fragColor;
 out vec3 fragPos;
@@ -1359,7 +1430,7 @@ out vec3 fragNormal;
 void main() {
     fragTexCoord = vertexTexCoord;
     fragColor = vertexColor;
-    fragPos = vertexPosition;
+    fragPos = (matModel * vec4(vertexPosition, 1.0)).xyz;
     fragNormal = vertexNormal;
     gl_Position = mvp * vec4(vertexPosition, 1.0);
 }`
@@ -1552,7 +1623,9 @@ func (w *World) EndShader() {
 	}
 }
 
-func (w *World) visibleChunks(cam rl.Camera3D, fn func(c *chunk)) {
+// visibleChunks walks the chunks, each shifted by whole worlds so it sits as
+// close to the camera as possible: that is what makes the wrap seamless.
+func (w *World) visibleChunks(cam rl.Camera3D, fn func(c *chunk, m rl.Matrix)) {
 	w.flushLight()
 	fwd := rl.Vector3Normalize(rl.Vector3Subtract(cam.Target, cam.Position))
 	for cj := 0; cj < w.ncz; cj++ {
@@ -1563,10 +1636,12 @@ func (w *World) visibleChunks(cam rl.Camera3D, fn func(c *chunk)) {
 				c.dirty = false
 			}
 			centre := rl.NewVector3(float32(ci*chunkSize+chunkSize/2+originX), worldH/2, float32(cj*chunkSize+chunkSize/2+originZ))
-			if rl.Vector3DotProduct(rl.Vector3Subtract(centre, cam.Position), fwd) < -28 {
+			near := Near(centre, cam.Position)
+			ox, oz := near.X-centre.X, near.Z-centre.Z
+			if rl.Vector3DotProduct(rl.Vector3Subtract(near, cam.Position), fwd) < -28 {
 				continue
 			}
-			fn(c)
+			fn(c, rl.MatrixTranslate(ox, 0, oz))
 		}
 	}
 }
@@ -1576,9 +1651,9 @@ func (w *World) Draw(cam rl.Camera3D) {
 	if !w.gpu {
 		w.initGPU()
 	}
-	w.visibleChunks(cam, func(c *chunk) {
+	w.visibleChunks(cam, func(c *chunk, m rl.Matrix) {
 		if c.opaque.loaded {
-			rl.DrawMesh(c.opaque.mesh, w.mat, rl.MatrixIdentity())
+			rl.DrawMesh(c.opaque.mesh, w.mat, m)
 		}
 	})
 }
@@ -1591,9 +1666,9 @@ func (w *World) DrawTranslucent(cam rl.Camera3D) {
 		rl.SetShaderValue(w.shader, w.locWater, []float32{1}, rl.ShaderUniformFloat)
 	}
 	rl.DisableBackfaceCulling()
-	w.visibleChunks(cam, func(c *chunk) {
+	w.visibleChunks(cam, func(c *chunk, m rl.Matrix) {
 		if c.trans.loaded {
-			rl.DrawMesh(c.trans.mesh, w.mat, rl.MatrixIdentity())
+			rl.DrawMesh(c.trans.mesh, w.mat, m)
 		}
 	})
 	rl.EnableBackfaceCulling()

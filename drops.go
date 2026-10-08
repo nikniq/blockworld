@@ -41,6 +41,7 @@ func (g *Game) updateDrops(dt float32) {
 		}
 		var res MoveResult
 		d.Pos, res = g.World.MoveBox(d.Pos, 0.12, 0.25, rl.Vector3Scale(d.Vel, dt), false)
+		d.Pos = WrapPos(d.Pos)
 		if res.Ground {
 			d.Vel.Y = 0
 			d.Vel.X *= 1 - dt*8
@@ -52,7 +53,8 @@ func (g *Game) updateDrops(dt float32) {
 		if d.Age > 240 {
 			continue
 		}
-		flat := rl.Vector3Distance(rl.NewVector3(d.Pos.X, 0, d.Pos.Z), rl.NewVector3(p.Pos.X, 0, p.Pos.Z))
+		fd := WrapDelta(d.Pos, p.Pos)
+		flat := float32(math.Sqrt(float64(fd.X*fd.X + fd.Z*fd.Z)))
 		if d.Age > 0.5 && flat < 1.3 && math.Abs(float64(p.Pos.Y-d.Pos.Y)) < 1.8 {
 			if d.Ammo > 0 {
 				p.Reserve += d.Ammo

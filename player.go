@@ -427,6 +427,7 @@ func (p *Player) Update(dt float32, w *World) {
 		delta.Y = p.VelY * dt
 		p.Pos, res = w.MoveBox(p.Pos, playerHalfW, playerHeight, delta, false)
 	}
+	p.Pos = WrapPos(p.Pos)
 	if res.Ground || res.Ceiling {
 		p.VelY = 0
 	}
@@ -590,7 +591,7 @@ func (p *Player) TryShootBow() bool {
 
 // KnockBack shoves the player away from a point and hops them slightly.
 func (p *Player) KnockBack(from rl.Vector3, strength float32) {
-	d := rl.Vector3Subtract(p.Pos, from)
+	d := WrapDelta(p.Pos, from)
 	d.Y = 0
 	if l := rl.Vector3Length(d); l > 0.01 {
 		d = rl.Vector3Scale(d, strength/l)

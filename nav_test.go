@@ -46,7 +46,7 @@ func TestNavFieldReachesSpawn(t *testing.T) {
 		if !ok {
 			break
 		}
-		pos = rl.Vector3Add(pos, rl.Vector3Scale(d, 0.4))
+		pos = WrapPos(rl.Vector3Add(pos, rl.Vector3Scale(d, 0.4)))
 		x, z := nav.cellOf(pos)
 		h := nav.Height[z*nav.N+x]
 		if h-prevH > navStepUp {
@@ -54,7 +54,7 @@ func TestNavFieldReachesSpawn(t *testing.T) {
 		}
 		prevH = h
 	}
-	if rl.Vector3Distance(rl.NewVector3(pos.X, 0, pos.Z), rl.NewVector3(spawn.X, 0, spawn.Z)) > 1.5 {
+	if WrapDist(rl.NewVector3(pos.X, 0, pos.Z), rl.NewVector3(spawn.X, 0, spawn.Z)) > 1.5 {
 		t.Fatalf("did not reach goal, ended at %v (started %v)", pos, start)
 	}
 }

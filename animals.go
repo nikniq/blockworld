@@ -94,7 +94,7 @@ func (a *Animal) Update(dt float32, w *World, p Target) int {
 	speed := float32(0)
 	if a.Flee > 0 && a.Spec.Damage > 0 {
 		// A provoked dinosaur charges and bites instead of fleeing.
-		to := rl.Vector3Subtract(p.Pos, a.Pos)
+		to := WrapDelta(p.Pos, a.Pos)
 		to.Y = 0
 		dist := rl.Vector3Length(to)
 		if dist > 0.01 {
@@ -110,7 +110,7 @@ func (a *Animal) Update(dt float32, w *World, p Target) int {
 		}
 	} else if a.Flee > 0 {
 		// Run away from the player.
-		away := rl.Vector3Subtract(a.Pos, p.Pos)
+		away := WrapDelta(a.Pos, p.Pos)
 		away.Y = 0
 		if l := rl.Vector3Length(away); l > 0.01 {
 			a.Heading = rl.Vector3Scale(away, 1/l)
@@ -135,6 +135,7 @@ func (a *Animal) Update(dt float32, w *World, p Target) int {
 	delta := rl.NewVector3(a.Heading.X*speed*dt, a.VelY*dt, a.Heading.Z*speed*dt)
 	var res MoveResult
 	a.Pos, res = w.MoveBox(a.Pos, a.Spec.Radius, a.Spec.Height, delta, true)
+	a.Pos = WrapPos(a.Pos)
 	if res.Ground || res.Ceiling {
 		a.VelY = 0
 	}
@@ -302,7 +303,7 @@ func (g *Game) updateAnimals(dt float32) {
 		}
 		if a.Alive && a.Kind == AnimalDino {
 			// Thudding steps and the occasional roar, by distance.
-			d := rl.Vector3Distance(a.Pos, g.Player.Pos)
+			d := WrapDist(a.Pos, g.Player.Pos)
 			if a.RoarCD == 0 {
 				a.RoarCD = 9 + rand.Float32()*12
 				if vol := 0.9 * clamp(1-d/45, 0, 1); vol > 0.05 {

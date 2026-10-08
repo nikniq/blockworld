@@ -116,7 +116,7 @@ func (g *Game) updateArrows(dt float32) {
 			g.burst(a.Pos, rl.NewColor(200, 190, 170, 255), 4)
 			continue
 		}
-		a.Pos = next
+		a.Pos = WrapPos(next)
 		keep = append(keep, *a)
 	}
 	g.Arrows = keep

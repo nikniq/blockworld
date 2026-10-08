@@ -6,6 +6,8 @@ block textures and sound effects are generated at startup.
 
 ## Gameplay
 
+- The world has no edges: it wraps around, so walking east you eventually arrive from the west with
+  terrain, caves, light and hostiles continuing seamlessly across the seam.
 - A 192x192x64 block world is generated every run: hills, a mountain band, beaches, a sea,
   winding caves and ore veins (coal, iron, gold, diamond), plus stone-brick ruins for cover.
 - **Biomes**: plains with tall grass and flowers, oak and birch forests, deserts with cacti (they sting),

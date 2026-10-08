@@ -1,3 +1,7 @@
+//go:debug randseednop=0
+
+// Keep math/rand.Seed effective (Go 1.24 made it a no-op) so seeded tests and
+// the harnesses generate the same world every run.
 package main
 
 import (
@@ -577,6 +581,7 @@ func (g *Game) updatePrimed(dt float32) {
 		t.VelY = max(t.VelY-gravity*dt, -25)
 		var res MoveResult
 		t.Pos, res = g.World.MoveBox(t.Pos, 0.45, 0.95, rl.NewVector3(0, t.VelY*dt, 0), false)
+		t.Pos = WrapPos(t.Pos)
 		if res.Ground || res.Ceiling {
 			t.VelY = 0
 		}
@@ -594,19 +599,19 @@ func (g *Game) updatePrimed(dt float32) {
 func (g *Game) blast(pos rl.Vector3, r, dmg float32) {
 	reach := r * 2.5
 	for _, t := range g.targets() {
-		if d := rl.Vector3Distance(pos, rl.Vector3Add(t.Pos, rl.NewVector3(0, 0.9, 0))); d < reach {
+		if d := WrapDist(pos, rl.Vector3Add(t.Pos, rl.NewVector3(0, 0.9, 0))); d < reach {
 			g.hurtTargetFrom(t.ID, int(dmg*(1-d/reach)*damageScale()), "was blown up", true, pos, 8*(1-d/reach))
 		}
 	}
 	for _, e := range g.Enemies {
-		if e.Alive && rl.Vector3Distance(pos, e.Pos) < r*1.6 {
+		if e.Alive && WrapDist(pos, e.Pos) < r*1.6 {
 			if e.Hit(int(dmg / 8)) {
 				g.killEnemy(e, e.Spec.Points/2)
 			}
 		}
 	}
 	for _, a := range g.Animals {
-		if a.Alive && rl.Vector3Distance(pos, a.Pos) < r*1.6 {
+		if a.Alive && WrapDist(pos, a.Pos) < r*1.6 {
 			if a.Hit(int(dmg / 8)) {
 				g.killAnimal(a)
 			}
@@ -668,11 +673,22 @@ func (g *Game) burstBlock(pos rl.Vector3, b Block, n int) {
 // blockOccupied reports whether an entity stands in the given block cell.
 func (g *Game) blockOccupied(x, y, z int) bool {
 	cell := rl.NewBoundingBox(rl.NewVector3(float32(x), float32(y), float32(z)), rl.NewVector3(float32(x+1), float32(y+1), float32(z+1)))
-	if rl.CheckCollisionBoxes(cell, g.Player.Box()) {
+	centre := rl.NewVector3(float32(x)+0.5, float32(y), float32(z)+0.5)
+	shift := func(b rl.BoundingBox, pos rl.Vector3) rl.BoundingBox {
+		n := Near(pos, centre)
+		d := rl.Vector3Subtract(n, pos)
+		return rl.NewBoundingBox(rl.Vector3Add(b.Min, d), rl.Vector3Add(b.Max, d))
+	}
+	if rl.CheckCollisionBoxes(cell, shift(g.Player.Box(), g.Player.Pos)) {
 		return true
 	}
 	for _, e := range g.Enemies {
-		if e.Alive && rl.CheckCollisionBoxes(cell, e.BB()) {
+		if e.Alive && rl.CheckCollisionBoxes(cell, shift(e.BB(), e.Pos)) {
+			return true
+		}
+	}
+	for _, r := range g.Remotes {
+		if rl.CheckCollisionBoxes(cell, shift(r.Target().Box, r.Pos)) {
 			return true
 		}
 	}
@@ -1459,7 +1475,8 @@ func (g *Game) clientUpdate(dt float32) {
 	keep := g.Drops[:0]
 	for _, d := range g.Drops {
 		d.Spin += dt * 2
-		flat := rl.Vector3Distance(rl.NewVector3(d.Pos.X, 0, d.Pos.Z), rl.NewVector3(p.Pos.X, 0, p.Pos.Z))
+		fd := WrapDelta(d.Pos, p.Pos)
+		flat := float32(math.Sqrt(float64(fd.X*fd.X + fd.Z*fd.Z)))
 		if flat < 1.3 && math.Abs(float64(p.Pos.Y-d.Pos.Y)) < 1.8 {
 			g.sendToHost(&Msg{Pickup: &struct{ ID uint32 }{d.ID}})
 			continue
@@ -1563,6 +1580,10 @@ func (g *Game) draw3D() {
 	}
 	w.Draw(cam)
 	// Entities go through the world shader so they are lit and fogged like the terrain.
+	// Entities are drawn at the copy of their position nearest the camera, so the
+	// wrapped world's seam is invisible; positions are restored afterwards.
+	restore := g.bringNear(cam.Position)
+	defer restore()
 	w.BeginShader()
 	for _, e := range g.Enemies {
 		e.Lum = w.Luminance(rl.NewVector3(e.Pos.X, e.Pos.Y+0.5, e.Pos.Z), env.Light)
@@ -1642,6 +1663,73 @@ func (g *Game) draw3D() {
 	w.DrawTranslucent(cam)
 	g.drawHeldBlock(cam)
 	rl.EndMode3D()
+}
+
+// bringNear shifts entity positions by whole worlds toward ref for drawing and
+// returns a function that puts them back.
+func (g *Game) bringNear(ref rl.Vector3) func() {
+	ePos := make([]rl.Vector3, len(g.Enemies))
+	for i, e := range g.Enemies {
+		ePos[i] = e.Pos
+		e.Pos = Near(e.Pos, ref)
+	}
+	aPos := make([]rl.Vector3, len(g.Animals))
+	for i, a := range g.Animals {
+		aPos[i] = a.Pos
+		a.Pos = Near(a.Pos, ref)
+	}
+	dPos := make([]rl.Vector3, len(g.Drops))
+	for i := range g.Drops {
+		dPos[i] = g.Drops[i].Pos
+		g.Drops[i].Pos = Near(g.Drops[i].Pos, ref)
+	}
+	rPos := map[uint32]rl.Vector3{}
+	for id, r := range g.Remotes {
+		rPos[id] = r.Pos
+		r.Pos = Near(r.Pos, ref)
+	}
+	arPos := make([]rl.Vector3, len(g.Arrows))
+	for i := range g.Arrows {
+		arPos[i] = g.Arrows[i].Pos
+		g.Arrows[i].Pos = Near(g.Arrows[i].Pos, ref)
+	}
+	pPos := make([]rl.Vector3, len(g.Primed))
+	for i := range g.Primed {
+		pPos[i] = g.Primed[i].Pos
+		g.Primed[i].Pos = Near(g.Primed[i].Pos, ref)
+	}
+	return func() {
+		for i, e := range g.Enemies {
+			if i < len(ePos) {
+				e.Pos = ePos[i]
+			}
+		}
+		for i, a := range g.Animals {
+			if i < len(aPos) {
+				a.Pos = aPos[i]
+			}
+		}
+		for i := range g.Drops {
+			if i < len(dPos) {
+				g.Drops[i].Pos = dPos[i]
+			}
+		}
+		for id, r := range g.Remotes {
+			if p, ok := rPos[id]; ok {
+				r.Pos = p
+			}
+		}
+		for i := range g.Arrows {
+			if i < len(arPos) {
+				g.Arrows[i].Pos = arPos[i]
+			}
+		}
+		for i := range g.Primed {
+			if i < len(pPos) {
+				g.Primed[i].Pos = pPos[i]
+			}
+		}
+	}
 }
 
 // drawHeldBlock renders the selected block as a real cube in the player's hand.
@@ -2081,7 +2169,7 @@ func (g *Game) drawHUD() {
 		cam := g.camera()
 		fwd := rl.Vector3Normalize(rl.Vector3Subtract(cam.Target, cam.Position))
 		for _, r := range g.Remotes {
-			head := rl.Vector3Add(r.Pos, rl.NewVector3(0, playerHeight+0.4, 0))
+			head := rl.Vector3Add(Near(r.Pos, cam.Position), rl.NewVector3(0, playerHeight+0.4, 0))
 			if rl.Vector3DotProduct(rl.Vector3Subtract(head, cam.Position), fwd) <= 0.5 {
 				continue
 			}
@@ -2136,7 +2224,8 @@ func (g *Game) drawFullMap(sw, sh int32) {
 	rl.DrawRectangle(mx-6, my-6, size+12, size+12, rl.NewColor(30, 30, 34, 240))
 	cell := float32(size) / worldW
 	toMap := func(x, z float32) (float32, float32) {
-		return float32(mx) + (x-originX)*cell, float32(my) + (z-originZ)*cell
+		q := WrapPos(rl.NewVector3(x, 0, z))
+		return float32(mx) + (q.X-originX)*cell, float32(my) + (q.Z-originZ)*cell
 	}
 	if g.mapOK {
 		rl.DrawTexturePro(g.mapTex, rl.NewRectangle(0, 0, worldW, worldD), rl.NewRectangle(float32(mx), float32(my), float32(size), float32(size)), rl.Vector2{}, 0, rl.White)
@@ -2244,7 +2333,8 @@ func (g *Game) drawMinimap(sw int32) {
 	mx, my := sw-20-size, int32(50)
 	cell := float32(size) / worldW
 	toMap := func(x, z float32) (float32, float32) {
-		return float32(mx) + (x-originX)*cell, float32(my) + (z-originZ)*cell
+		q := WrapPos(rl.NewVector3(x, 0, z))
+		return float32(mx) + (q.X-originX)*cell, float32(my) + (q.Z-originZ)*cell
 	}
 	if g.mapOK {
 		rl.DrawTexturePro(g.mapTex, rl.NewRectangle(0, 0, worldW, worldD), rl.NewRectangle(float32(mx), float32(my), size, size), rl.Vector2{}, 0, rl.NewColor(255, 255, 255, 235))
@@ -2268,7 +2358,8 @@ func (g *Game) drawMinimap(sw int32) {
 		deg += 360
 	}
 	dirs := [...]string{"N", "NE", "E", "SE", "S", "SW", "W", "NW"}
-	label := fmt.Sprintf("Facing %s  (%d, %d, %d)", dirs[int((deg+22.5)/45)%8], floorI(p.Pos.X), floorI(p.Pos.Y), floorI(p.Pos.Z))
+	wp := WrapPos(p.Pos)
+	label := fmt.Sprintf("Facing %s  (%d, %d, %d)", dirs[int((deg+22.5)/45)%8], floorI(wp.X), floorI(wp.Y), floorI(wp.Z))
 	rl.DrawRectangle(mx, my+size+4, size, 22, rl.NewColor(0, 0, 0, 140))
 	rl.DrawText(label, mx+6, my+size+8, 14, rl.LightGray)
 }
@@ -2762,6 +2853,19 @@ func (g *Game) scriptedShots(frame int) bool {
 		}
 	case 200:
 		rl.TakeScreenshot("shot_sky.png")
+	case 205:
+		// Stand on the east edge and look west across the wrap seam.
+		p := g.Player
+		p.Pos = rl.NewVector3(float32(originX+worldW)-0.5, float32(g.World.SurfaceY(originX+worldW-1, 0)), 0.5)
+		p.Yaw = -math.Pi / 2 // face +X: across the edge
+		p.Pitch = -0.05
+		p.Flying, settings.Creative = true, true
+		p.Pos.Y += 6
+	case 208:
+		rl.TakeScreenshot("shot_edge.png")
+		settings.Creative = false
+		g.Player.Flying = false
+		g.Player.Pos = g.Spawn
 	case 210:
 		g.Player.Pitch = -0.15
 		g.ThirdPerson = true

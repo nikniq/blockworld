@@ -134,7 +134,7 @@ func (e *Enemy) Update(dt float32, w *World, nav *NavGrid, p Target, others []*E
 	e.AttackCD = max(0, e.AttackCD-dt)
 	e.Phase += dt * e.Speed * 2
 
-	to := rl.Vector3Subtract(p.Pos, e.Pos)
+	to := WrapDelta(p.Pos, e.Pos)
 	to.Y = 0
 	dist := rl.Vector3Length(to)
 	dy := math.Abs(float64(p.Pos.Y - e.Pos.Y))
@@ -161,7 +161,7 @@ func (e *Enemy) Update(dt float32, w *World, nav *NavGrid, p Target, others []*E
 	e.ShootCD = max(0, e.ShootCD-dt)
 	if e.Spec.Ranged {
 		eye := rl.NewVector3(e.Pos.X, e.Pos.Y+e.HeadY(), e.Pos.Z)
-		target := p.Eye
+		target := Near(p.Eye, eye)
 		clear := !w.RayCast(eye, rl.Vector3Subtract(target, eye), rl.Vector3Distance(eye, target)).Hit
 		if clear && dist < 16 && e.ShootCD == 0 {
 			e.ShootCD = 2.2
@@ -211,6 +211,7 @@ func (e *Enemy) Update(dt float32, w *World, nav *NavGrid, p Target, others []*E
 	delta.Y = e.VelY * dt
 	var res MoveResult
 	e.Pos, res = w.MoveBox(e.Pos, e.Spec.Radius, e.Spec.Height, delta, true)
+	e.Pos = WrapPos(e.Pos)
 	if res.Ground || res.Ceiling {
 		e.VelY = 0
 	}
@@ -222,7 +223,7 @@ func (e *Enemy) Update(dt float32, w *World, nav *NavGrid, p Target, others []*E
 		if o == e || !o.Alive {
 			continue
 		}
-		d := rl.Vector3Subtract(e.Pos, o.Pos)
+		d := WrapDelta(e.Pos, o.Pos)
 		d.Y = 0
 		l := rl.Vector3Length(d)
 		minD := (e.Spec.Radius + o.Spec.Radius) * 1.1

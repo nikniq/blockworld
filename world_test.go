@@ -691,3 +691,63 @@ func TestDoorsTraderMineshaft(t *testing.T) {
 		t.Fatal("trade should take the gold and pay ammo")
 	}
 }
+
+// The world wraps: blocks, surfaces, light and pathfinding continue across the edges.
+func TestWorldWraps(t *testing.T) {
+	rand.Seed(16)
+	w := NewWorld()
+	east, west := originX+worldW-1, originX
+	// Terrain height (ignoring trees and plants) is continuous across the seam: periodic noise.
+	ground := func(x, z int) int {
+		for y := worldH - 1; y >= 0; y-- {
+			switch b := w.Get(x, y, z); b {
+			case Air, Water, Log, BirchLog, Leaves, SpruceLeaves, Cactus:
+				continue
+			default:
+				if blocks[b].Tiny {
+					continue
+				}
+				return y
+			}
+		}
+		return 0
+	}
+	jumps, samples := 0, 0
+	for z := originZ; z < originZ+worldD; z += 3 {
+		samples++
+		if d := ground(east, z) - ground(west, z); d > 3 || d < -3 {
+			jumps++ // ruins and dungeons may legitimately sit on the seam
+		}
+	}
+	if jumps*10 > samples {
+		t.Fatalf("%d of %d samples jump across the seam: terrain is not periodic", jumps, samples)
+	}
+	// Reading and writing past the edge lands on the far side.
+	w.Set(originX+worldW+2, 30, 5, GoldBlock)
+	if w.Get(originX+2, 30, 5) != GoldBlock || w.Get(originX+worldW+2, 30, 5) != GoldBlock {
+		t.Fatal("blocks should wrap in x")
+	}
+	w.Set(7, 31, originZ-3, Glass)
+	if w.Get(7, 31, originZ+worldD-3) != Glass {
+		t.Fatal("blocks should wrap in z")
+	}
+	if !w.Solid(originX-1, w.SurfaceY(east, 0)-1, 0) {
+		t.Fatal("solidity should wrap")
+	}
+	// Deltas and positions.
+	a := rl.NewVector3(float32(east)+0.5, 10, 0)
+	b := rl.NewVector3(float32(west)+0.5, 10, 0)
+	if d := WrapDist(a, b); d > 1.01 {
+		t.Fatalf("neighbours across the seam are %v apart", d)
+	}
+	if p := WrapPos(rl.NewVector3(float32(originX+worldW)+3, 1, float32(originZ)-1)); p.X != float32(originX)+3 || p.Z != float32(originZ+worldD)-1 {
+		t.Fatalf("WrapPos %v", p)
+	}
+	// Pathfinding seeds and steps across the seam.
+	nav := NewNavGrid(w)
+	nav.Update([]rl.Vector3{b}, w)
+	x, z := nav.cellOf(a)
+	if nav.Dist[z*nav.N+x] < 0 || nav.Dist[z*nav.N+x] > 3 {
+		t.Fatalf("east edge should be a step from the west edge: dist %d", nav.Dist[z*nav.N+x])
+	}
+}

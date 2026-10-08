@@ -53,9 +53,7 @@ func (g *NavGrid) refresh(w *World) {
 }
 
 func (g *NavGrid) cellOf(p rl.Vector3) (int, int) {
-	x := floorI(p.X - g.Origin)
-	z := floorI(p.Z - g.Origin)
-	return int(clamp(float32(x), 0, float32(g.N-1))), int(clamp(float32(z), 0, float32(g.N-1)))
+	return wrapI(floorI(p.X-g.Origin), g.N), wrapI(floorI(p.Z-g.Origin), g.N)
 }
 
 func (g *NavGrid) center(x, z int) rl.Vector3 {
@@ -63,7 +61,8 @@ func (g *NavGrid) center(x, z int) rl.Vector3 {
 }
 
 func (g *NavGrid) walkable(x, z int) bool {
-	return x >= 0 && z >= 0 && x < g.N && z < g.N && g.Walk[z*g.N+x]
+	x, z = wrapI(x, g.N), wrapI(z, g.N)
+	return g.Walk[z*g.N+x]
 }
 
 // canStep reports whether an agent may move from cell a to adjacent cell b.
@@ -71,6 +70,7 @@ func (g *NavGrid) canStep(ax, az, bx, bz int) bool {
 	if !g.walkable(ax, az) || !g.walkable(bx, bz) {
 		return false
 	}
+	ax, az, bx, bz = wrapI(ax, g.N), wrapI(az, g.N), wrapI(bx, g.N), wrapI(bz, g.N)
 	dh := g.Height[bz*g.N+bx] - g.Height[az*g.N+ax]
 	return dh <= navStepUp && -dh <= navDropDown
 }
@@ -99,6 +99,7 @@ func (g *NavGrid) Update(targets []rl.Vector3, w *World) {
 	}
 	g.queue = g.queue[:0]
 	seed := func(x, z int) {
+		x, z = wrapI(x, g.N), wrapI(z, g.N)
 		if g.walkable(x, z) && g.Dist[z*g.N+x] < 0 {
 			g.Dist[z*g.N+x] = 0
 			g.queue = append(g.queue, int32(z*g.N+x))
@@ -127,7 +128,7 @@ func (g *NavGrid) Update(targets []rl.Vector3, w *World) {
 		x, z := i%g.N, i/g.N
 		d := g.Dist[i] + 1
 		for _, n := range [4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
-			nx, nz := x+n[0], z+n[1]
+			nx, nz := wrapI(x+n[0], g.N), wrapI(z+n[1], g.N)
 			if g.canStep(nx, nz, x, z) && g.Dist[nz*g.N+nx] < 0 {
 				g.Dist[nz*g.N+nx] = d
 				g.queue = append(g.queue, int32(nz*g.N+nx))
@@ -152,7 +153,7 @@ func (g *NavGrid) Dir(pos rl.Vector3) (rl.Vector3, bool) {
 			if dx == 0 && dz == 0 {
 				continue
 			}
-			nx, nz := x+dx, z+dz
+			nx, nz := wrapI(x+dx, g.N), wrapI(z+dz, g.N)
 			if !g.walkable(nx, nz) {
 				continue
 			}
@@ -176,7 +177,7 @@ func (g *NavGrid) Dir(pos rl.Vector3) (rl.Vector3, bool) {
 	if bx == x && bz == z {
 		return rl.Vector3{}, false
 	}
-	to := rl.Vector3Subtract(g.center(bx, bz), pos)
+	to := WrapDelta(g.center(bx, bz), pos)
 	to.Y = 0
 	l := rl.Vector3Length(to)
 	if l < 1e-4 {
