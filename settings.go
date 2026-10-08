@@ -23,6 +23,7 @@ type Settings struct {
 	Creative    bool   // creative mode: fly, build freely, take no damage
 	Music       bool
 	Antialias   bool
+	WorldSize   int // footprint of newly generated worlds
 }
 
 var difficultyNames = [...]string{"Peaceful", "Normal", "Hard"}
@@ -83,6 +84,10 @@ func loadSettings() Settings {
 			s.Music = v == "true"
 		case "antialias":
 			s.Antialias = v == "true"
+		case "world_size":
+			if n, err := strconv.Atoi(v); err == nil && n >= 48 && n%48 == 0 {
+				s.WorldSize = n
+			}
 		case "difficulty":
 			if n, err := strconv.Atoi(v); err == nil && n >= 0 && n <= 2 {
 				s.Difficulty = n
@@ -100,7 +105,7 @@ func (s Settings) save() {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return
 	}
-	text := fmt.Sprintf("sensitivity=%.2f\nvolume=%.2f\ninvert_y=%t\nfullscreen=%t\nswap_buttons=%t\ndifficulty=%d\nlast_join=%s\nname=%s\ncreative=%t\nmusic=%t\nantialias=%t\n", s.Sensitivity, s.Volume, s.InvertY, s.Fullscreen, s.SwapButtons, s.Difficulty, s.LastJoin, s.Name, s.Creative, s.Music, s.Antialias)
+	text := fmt.Sprintf("sensitivity=%.2f\nvolume=%.2f\ninvert_y=%t\nfullscreen=%t\nswap_buttons=%t\ndifficulty=%d\nlast_join=%s\nname=%s\ncreative=%t\nmusic=%t\nantialias=%t\nworld_size=%d\n", s.Sensitivity, s.Volume, s.InvertY, s.Fullscreen, s.SwapButtons, s.Difficulty, s.LastJoin, s.Name, s.Creative, s.Music, s.Antialias, s.WorldSize)
 	_ = os.WriteFile(p, []byte(text), 0o644)
 }
 

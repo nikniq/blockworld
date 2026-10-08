@@ -10,17 +10,35 @@ import (
 // The world is a fixed voxel volume. Block coordinates run from originX/originZ
 // (inclusive) to originX+worldW / originZ+worldD (exclusive) on X/Z and 0..worldH on Y.
 const (
-	worldW     = 192
 	worldH     = 96
-	worldD     = 192
 	chunkSize  = 16
-	originX    = -worldW / 2
-	originZ    = -worldD / 2
-	groundBase = 32                            // the surface terrain starts this far up; below is the deep
-	seaLevel   = groundBase + 10               // every air cell at or below this height is filled with water
-	deepTop    = groundBase - 4                // deep stone, big caverns and the richest ores lie below here
-	areaScale  = (worldW * worldD) / (96 * 96) // feature counts were tuned on a 96x96 map
+	groundBase = 32              // the surface terrain starts this far up; below is the deep
+	seaLevel   = groundBase + 10 // every air cell at or below this height is filled with water
+	deepTop    = groundBase - 4  // deep stone, big caverns and the richest ores lie below here
 )
+
+// World footprint. Chosen per world (settings), stored in saves and sent to
+// joining players; setWorldSize must run before a world is created or loaded.
+var (
+	worldW    = 384
+	worldD    = 384
+	originX   = -worldW / 2
+	originZ   = -worldD / 2
+	areaScale = (worldW * worldD) / (96 * 96) // feature counts were tuned on a 96x96 map
+)
+
+// worldSizes are the choices offered in the menu (multiples of 48 so the noise tiles).
+var worldSizes = []int{192, 384, 576}
+var worldSizeNames = []string{"Normal (192)", "Large (384)", "Huge (576)"}
+
+func setWorldSize(n int) {
+	if n < chunkSize || n%48 != 0 {
+		n = 384
+	}
+	worldW, worldD = n, n
+	originX, originZ = -n/2, -n/2
+	areaScale = max(1, (n*n)/(96*96))
+}
 
 type Block uint8
 
@@ -363,29 +381,30 @@ type World struct {
 	ncx       int
 	ncz       int
 
-	gpu      bool // GPU resources created
-	tex      rl.Texture2D
-	mat      rl.Material
-	shader   rl.Shader // terrain
-	eshader  rl.Shader // entities
-	shaderOK bool
-	locView  int32
-	locFog   int32
-	locFogS  int32
-	locFogE  int32
-	locLight int32
-	locSun   int32
-	locSunD  int32
-	locFlick int32
-	locTile  int32
-	locScrol int32
-	locWater int32
-	elocView int32
-	elocFog  int32
-	elocFogS int32
-	elocFogE int32
-	blockM   map[Block]*meshBuf // unit cube meshes for item drops
-	envTime  float32
+	gpu       bool // GPU resources created
+	tex       rl.Texture2D
+	mat       rl.Material
+	shader    rl.Shader // terrain
+	eshader   rl.Shader // entities
+	shaderOK  bool
+	locView   int32
+	locFog    int32
+	locFogS   int32
+	locFogE   int32
+	locLight  int32
+	locSun    int32
+	locSunD   int32
+	locFlick  int32
+	locTile   int32
+	locScrol  int32
+	locWater  int32
+	elocView  int32
+	elocFog   int32
+	elocFogS  int32
+	elocFogE  int32
+	blockM    map[Block]*meshBuf // unit cube meshes for item drops
+	envTime   float32
+	envFogEnd float32
 }
 
 func NewWorld() *World {
@@ -1267,17 +1286,17 @@ func wrapZ(z int) int { return ((z % worldD) + worldD) % worldD }
 
 // WrapPos moves a world position into the canonical range.
 func WrapPos(p rl.Vector3) rl.Vector3 {
-	for p.X < originX {
-		p.X += worldW
+	for p.X < float32(originX) {
+		p.X += float32(worldW)
 	}
-	for p.X >= originX+worldW {
-		p.X -= worldW
+	for p.X >= float32(originX)+float32(worldW) {
+		p.X -= float32(worldW)
 	}
-	for p.Z < originZ {
-		p.Z += worldD
+	for p.Z < float32(originZ) {
+		p.Z += float32(worldD)
 	}
-	for p.Z >= originZ+worldD {
-		p.Z -= worldD
+	for p.Z >= float32(originZ)+float32(worldD) {
+		p.Z -= float32(worldD)
 	}
 	return p
 }
@@ -1285,17 +1304,17 @@ func WrapPos(p rl.Vector3) rl.Vector3 {
 // WrapDelta returns a - b along the shortest path across the wrapped world.
 func WrapDelta(a, b rl.Vector3) rl.Vector3 {
 	d := rl.Vector3Subtract(a, b)
-	for d.X > worldW/2 {
-		d.X -= worldW
+	for d.X > float32(worldW)/2 {
+		d.X -= float32(worldW)
 	}
-	for d.X < -worldW/2 {
-		d.X += worldW
+	for d.X < -float32(worldW)/2 {
+		d.X += float32(worldW)
 	}
-	for d.Z > worldD/2 {
-		d.Z -= worldD
+	for d.Z > float32(worldD)/2 {
+		d.Z -= float32(worldD)
 	}
-	for d.Z < -worldD/2 {
-		d.Z += worldD
+	for d.Z < -float32(worldD)/2 {
+		d.Z += float32(worldD)
 	}
 	return d
 }
@@ -1587,6 +1606,9 @@ func (m *meshBuf) upload() {
 	m.mesh.Colors = &m.cols[0]
 	rl.UploadMesh(&m.mesh, false)
 	m.loaded = true
+	// The GPU has its copy; drop the CPU buffers (a large world would otherwise
+	// hold hundreds of megabytes of vertices). Rebuilds reallocate.
+	m.verts, m.norms, m.uvs, m.cols = nil, nil, nil, nil
 }
 
 func (w *World) buildChunk(ci, cj int, c *chunk) {
@@ -1898,6 +1920,7 @@ func (w *World) SetEnv(cam rl.Camera3D, env Env) {
 	rl.SetShaderValue(w.shader, w.locScrol, []float32{0, 0}, rl.ShaderUniformVec2)
 	rl.SetShaderValue(w.shader, w.locWater, []float32{0}, rl.ShaderUniformFloat)
 	w.envTime = env.Time
+	w.envFogEnd = env.FogEnd
 	rl.SetShaderValue(w.eshader, w.elocView, []float32{cam.Position.X, cam.Position.Y, cam.Position.Z}, rl.ShaderUniformVec3)
 	rl.SetShaderValue(w.eshader, w.elocFog, []float32{float32(env.Fog.R) / 255, float32(env.Fog.G) / 255, float32(env.Fog.B) / 255}, rl.ShaderUniformVec3)
 	rl.SetShaderValue(w.eshader, w.elocFogS, []float32{env.FogStart}, rl.ShaderUniformFloat)
@@ -1925,15 +1948,22 @@ func (w *World) visibleChunks(cam rl.Camera3D, fn func(c *chunk, m rl.Matrix)) {
 	for cj := 0; cj < w.ncz; cj++ {
 		for ci := 0; ci < w.ncx; ci++ {
 			c := w.chunks[cj*w.ncx+ci]
-			if c.dirty {
-				w.buildChunk(ci, cj, c)
-				c.dirty = false
-			}
 			centre := rl.NewVector3(float32(ci*chunkSize+chunkSize/2+originX), worldH/2, float32(cj*chunkSize+chunkSize/2+originZ))
 			near := Near(centre, cam.Position)
 			ox, oz := near.X-centre.X, near.Z-centre.Z
 			if rl.Vector3DotProduct(rl.Vector3Subtract(near, cam.Position), fwd) < -28 {
 				continue
+			}
+			// Nothing beyond the fog is visible: skip (and never even build) those chunks.
+			if limit := w.envFogEnd + chunkSize; limit > 0 {
+				dx, dz := near.X-cam.Position.X, near.Z-cam.Position.Z
+				if dx*dx+dz*dz > limit*limit {
+					continue
+				}
+			}
+			if c.dirty {
+				w.buildChunk(ci, cj, c)
+				c.dirty = false
 			}
 			fn(c, rl.MatrixTranslate(ox, 0, oz))
 		}

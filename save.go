@@ -10,7 +10,7 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-const saveVersion = 8
+const saveVersion = 9
 
 // SaveData is the persisted state of a run: the whole voxel volume, the
 // player, the clock and the animals. Hostiles and drops are not kept.
@@ -19,6 +19,7 @@ type SaveData struct {
 	NumBlocks int
 	Blocks    []Block
 	Seed      int
+	Width     int
 	Pos       rl.Vector3
 	Yaw       float32
 	Pitch     float32
@@ -104,7 +105,7 @@ func (g *Game) saveErr() error {
 	}
 	pl := g.Player
 	d := SaveData{
-		Version: saveVersion, NumBlocks: int(numBlocks), Blocks: g.World.Blocks, Seed: g.World.Seed,
+		Version: saveVersion, NumBlocks: int(numBlocks), Blocks: g.World.Blocks, Seed: g.World.Seed, Width: worldW,
 		Pos: pl.Pos, Yaw: pl.Yaw, Pitch: pl.Pitch, HP: pl.HP, Ammo: pl.Ammo, Reserve: pl.Reserve,
 		Inv: pl.Inv[:], SwordTier: pl.SwordTier, PickTier: pl.PickTier, ArmorTier: pl.ArmorTier,
 		Spawn: g.Spawn, Deaths: g.Deaths, Hunger: pl.Hunger, Won: g.Won, Lost: g.VillagersLost,
@@ -152,10 +153,13 @@ func (g *Game) load() bool {
 	}
 	var d SaveData
 	if err := gob.NewDecoder(zr).Decode(&d); err != nil || d.Version != saveVersion ||
-		d.NumBlocks != int(numBlocks) || len(d.Blocks) != worldW*worldH*worldD {
+		d.NumBlocks != int(numBlocks) || d.Width <= 0 || len(d.Blocks) != d.Width*worldH*d.Width {
 		return false
 	}
+	setWorldSize(d.Width)
+	g.loading = true
 	g.Reset()
+	g.loading = false
 	g.World.Unload()
 	g.World = NewWorldFromBlocks(d.Blocks, d.Seed)
 	g.Nav = NewNavGrid(g.World)

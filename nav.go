@@ -29,7 +29,7 @@ func NewNavGrid(w *World) *NavGrid {
 	n := worldW
 	g := &NavGrid{
 		N:      n,
-		Origin: originX,
+		Origin: float32(originX),
 		Walk:   make([]bool, n*n),
 		Height: make([]int, n*n),
 		Dist:   make([]int32, n*n),

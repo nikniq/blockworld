@@ -8,7 +8,10 @@ block textures and sound effects are generated at startup.
 
 - The world has no edges: it wraps around, so walking east you eventually arrive from the west with
   terrain, caves, light and hostiles continuing seamlessly across the seam.
-- A 192x192x96 block world is generated every run: hills, a mountain band, beaches, a sea,
+- Worlds come in three sizes, chosen with W on the main menu for the next new world: Normal (192x192),
+  Large (384x384, the default, four times the land) and Huge (576x576). All are 96 blocks tall and
+  everything scales with the area: villages, dungeons, mineshafts, ravines, herds and ores.
+- A world is generated every run: hills, a mountain band, beaches, a sea,
   winding caves and ore veins (coal, iron, gold, diamond), plus stone-brick ruins for cover.
 - **Biomes**: plains with tall grass and flowers, oak and birch forests, deserts with cacti (they sting),
   snowy taiga with tall spruces, and red-sand outback with pale eucalyptus and dead bushes.

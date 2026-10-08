@@ -106,6 +106,8 @@ type Game struct {
 	Disc           *Discovery
 	Talking        *Animal
 	Mount          *Animal
+	loading        bool // Reset called from load(): keep the save's world size
+	joining        bool // Reset called from Connect(): keep the host's world size
 	Conv           *Conversation
 	VillagerGrudge float32 // seconds left of the village being angry at the player
 	VillagersLost  int
@@ -168,6 +170,11 @@ func NewGame() *Game {
 func (g *Game) Reset() {
 	if g.World != nil {
 		g.World.Unload()
+	}
+	if g.State == StateMenu || g.World == nil || worldW != settings.WorldSize {
+		if !g.loading && !g.joining {
+			setWorldSize(settings.WorldSize)
+		}
 	}
 	g.World = NewWorld()
 	g.Nav = NewNavGrid(g.World)
@@ -2534,13 +2541,13 @@ func (g *Game) drawFullMap(sw, sh int32) {
 	mx, my := sw/2-size/2, int32(60)
 	rl.DrawRectangle(0, 0, sw, sh, rl.NewColor(0, 0, 0, 120))
 	rl.DrawRectangle(mx-6, my-6, size+12, size+12, rl.NewColor(30, 30, 34, 240))
-	cell := float32(size) / worldW
+	cell := float32(size) / float32(worldW)
 	toMap := func(x, z float32) (float32, float32) {
 		q := WrapPos(rl.NewVector3(x, 0, z))
-		return float32(mx) + (q.X-originX)*cell, float32(my) + (q.Z-originZ)*cell
+		return float32(mx) + (q.X-float32(originX))*cell, float32(my) + (q.Z-float32(originZ))*cell
 	}
 	if g.mapOK {
-		rl.DrawTexturePro(g.mapTex, rl.NewRectangle(0, 0, worldW, worldD), rl.NewRectangle(float32(mx), float32(my), float32(size), float32(size)), rl.Vector2{}, 0, rl.White)
+		rl.DrawTexturePro(g.mapTex, rl.NewRectangle(0, 0, float32(worldW), float32(worldD)), rl.NewRectangle(float32(mx), float32(my), float32(size), float32(size)), rl.Vector2{}, 0, rl.White)
 	}
 	for _, a := range g.Animals {
 		if a.Alive {
@@ -2656,13 +2663,13 @@ func (g *Game) refreshMinimap(dt float32) {
 func (g *Game) drawMinimap(sw int32) {
 	const size = 192
 	mx, my := sw-20-size, int32(50)
-	cell := float32(size) / worldW
+	cell := float32(size) / float32(worldW)
 	toMap := func(x, z float32) (float32, float32) {
 		q := WrapPos(rl.NewVector3(x, 0, z))
-		return float32(mx) + (q.X-originX)*cell, float32(my) + (q.Z-originZ)*cell
+		return float32(mx) + (q.X-float32(originX))*cell, float32(my) + (q.Z-float32(originZ))*cell
 	}
 	if g.mapOK {
-		rl.DrawTexturePro(g.mapTex, rl.NewRectangle(0, 0, worldW, worldD), rl.NewRectangle(float32(mx), float32(my), size, size), rl.Vector2{}, 0, rl.NewColor(255, 255, 255, 235))
+		rl.DrawTexturePro(g.mapTex, rl.NewRectangle(0, 0, float32(worldW), float32(worldD)), rl.NewRectangle(float32(mx), float32(my), size, size), rl.Vector2{}, 0, rl.NewColor(255, 255, 255, 235))
 	}
 	for _, e := range g.Enemies {
 		if !e.Alive {
@@ -2778,11 +2785,18 @@ func (g *Game) drawOverlay() {
 			found = fmt.Sprintf("   %d worlds found on your network", n)
 		}
 		centered(fmt.Sprintf("H  host your world for friends        J  join a friend's world%s        (you are %s)", found, playerName), sh/2+166, 22, rl.SkyBlue)
+		sizeName := fmt.Sprintf("%d", settings.WorldSize)
+		for i, n := range worldSizes {
+			if n == settings.WorldSize {
+				sizeName = worldSizeNames[i]
+			}
+		}
+		centered("W  new world size: "+sizeName, sh/2+196, 20, rl.LightGray)
 		if g.JoinErr != "" {
-			centered(g.JoinErr, sh/2+196, 18, rl.Orange)
+			centered(g.JoinErr, sh/2+222, 18, rl.Orange)
 		}
 		if g.HighScore > 0 {
-			centered(fmt.Sprintf("High score  %d", g.HighScore), sh/2+226, 22, rl.Gold)
+			centered(fmt.Sprintf("High score  %d", g.HighScore), sh/2+250, 22, rl.Gold)
 		}
 	case StatePaused:
 		centered("PAUSED", sh/2-120, 56, rl.White)
@@ -3509,6 +3523,15 @@ func main() {
 				} else {
 					g.State = StateMenu
 				}
+			} else if rl.IsKeyPressed(rl.KeyW) {
+				idx := 0
+				for i, n := range worldSizes {
+					if n == settings.WorldSize {
+						idx = i
+					}
+				}
+				settings.WorldSize = worldSizes[(idx+1)%len(worldSizes)]
+				settings.save()
 			} else if rl.IsKeyPressed(rl.KeyH) {
 				g.hostFromMenu()
 			} else if rl.IsKeyPressed(rl.KeyJ) {

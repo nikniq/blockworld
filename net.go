@@ -132,6 +132,7 @@ type Msg struct {
 		Spawn  rl.Vector3
 		Diffic int
 		Seed   int
+		Width  int
 	}
 	State *PlayerState
 	Block *struct {
@@ -448,7 +449,8 @@ func (g *Game) hostHandle(from uint32, m *Msg) {
 			Spawn  rl.Vector3
 			Diffic int
 			Seed   int
-		}{from, compressWorld(w.Blocks), g.Sky.T, g.Sky.Day, g.Night, g.Spawn, settings.Difficulty, w.Seed}})
+			Width  int
+		}{from, compressWorld(w.Blocks), g.Sky.T, g.Sky.Day, g.Night, g.Spawn, settings.Difficulty, w.Seed, worldW}})
 		g.say(m.Hello.Name+" joined", 2.5)
 		g.addChat("", m.Hello.Name+" joined")
 		n.broadcast(&Msg{Chat: &struct{ From, Text string }{"", m.Hello.Name + " joined"}}, from)
@@ -597,13 +599,18 @@ func (g *Game) Connect(addr, name string) error {
 		return fmt.Errorf("no welcome from host: %v", err)
 	}
 	_ = conn.SetReadDeadline(time.Time{})
-	blocks, err := decompressWorld(welcome.Welcome.World)
+	wl := welcome.Welcome
+	if wl.Width > 0 {
+		setWorldSize(wl.Width)
+	}
+	blocks, err := decompressWorld(wl.World)
 	if err != nil {
 		conn.Close()
 		return err
 	}
-	wl := welcome.Welcome
+	g.joining = true
 	g.Reset()
+	g.joining = false
 	g.World.Unload()
 	g.World = NewWorldFromBlocks(blocks, wl.Seed)
 	g.Nav = NewNavGrid(g.World)

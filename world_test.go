@@ -1,12 +1,43 @@
 package main
 
 import (
+	"os"
+
 	"math"
 	"math/rand"
 	"testing"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
+
+// Tests run on the normal size so world generation stays quick.
+func TestMain(m *testing.M) {
+	setWorldSize(192)
+	settings.WorldSize = 192
+	os.Exit(m.Run())
+}
+
+// Switching the footprint resizes every per-column structure consistently.
+func TestWorldSizeSwitch(t *testing.T) {
+	defer setWorldSize(192)
+	setWorldSize(384)
+	if worldW != 384 || originX != -192 || areaScale != 16 {
+		t.Fatalf("size 384: w=%d origin=%d scale=%d", worldW, originX, areaScale)
+	}
+	rand.Seed(26)
+	w := NewWorld()
+	if len(w.Blocks) != 384*worldH*384 || len(w.Height) != 384*384 || w.ncx != 24 {
+		t.Fatal("world structures should follow the size")
+	}
+	nav := NewNavGrid(w)
+	if nav.N != 384 {
+		t.Fatal("nav grid should follow the size")
+	}
+	s := w.SpawnPoint()
+	if w.WaterAt(s) {
+		t.Fatal("spawn should be dry")
+	}
+}
 
 // A generated world must contain a sea, caves and every ore, with bedrock at the bottom.
 func TestGenerateFeatures(t *testing.T) {
