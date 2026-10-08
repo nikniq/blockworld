@@ -10,7 +10,7 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-const saveVersion = 10
+const saveVersion = 11
 
 // SaveData is the persisted state of a run: the whole voxel volume, the
 // player, the clock and the animals. Hostiles and drops are not kept.
@@ -38,6 +38,8 @@ type SaveData struct {
 	Villages  []Village
 	WarRed    bool
 	WarBlue   bool
+	Mode      int
+	Hordes    int
 	Hunger    float32
 	SkyT      float32
 	Day       int
@@ -117,7 +119,7 @@ func (g *Game) saveErr() error {
 		Pos: pl.Pos, Yaw: pl.Yaw, Pitch: pl.Pitch, HP: pl.HP, Ammo: pl.Ammo, Reserve: pl.Reserve,
 		Inv: pl.Inv[:], SwordTier: pl.SwordTier, PickTier: pl.PickTier, ArmorTier: pl.ArmorTier,
 		Spawn: g.Spawn, Deaths: g.Deaths, Hunger: pl.Hunger, Won: g.Won, Lost: g.VillagersLost,
-		Flags: g.Flags, Villages: g.Villages, WarRed: g.WarRed, WarBlue: g.WarBlue,
+		Flags: g.Flags, Villages: g.Villages, WarRed: g.WarRed, WarBlue: g.WarBlue, Mode: settings.Mode, Hordes: g.Hordes,
 		SkyT: g.Sky.T, Day: g.Sky.Day, Night: g.Night, Score: g.Score, Kills: g.Kills,
 	}
 	for _, a := range g.Animals {
@@ -179,6 +181,9 @@ func (g *Game) load() bool {
 	pl.SwordTier, pl.PickTier, pl.ArmorTier = d.SwordTier, d.PickTier, d.ArmorTier
 	g.Spawn, g.Deaths, g.Won, g.VillagersLost = d.Spawn, d.Deaths, d.Won, d.Lost
 	g.Flags, g.Villages, g.WarRed, g.WarBlue = d.Flags, d.Villages, d.WarRed, d.WarBlue
+	settings.Mode = d.Mode
+	settings.applyMode()
+	g.Hordes = d.Hordes
 	pl.Hunger = d.Hunger
 	pl.EnsureHeld()
 	g.Sky.T, g.Sky.Day = d.SkyT, d.Day

@@ -110,8 +110,11 @@ type Game struct {
 	Villages       []Village
 	WarRed         bool // the player has fought Red (captured a flag or killed a villager)
 	WarBlue        bool
-	loading        bool // Reset called from load(): keep the save's world size
-	joining        bool // Reset called from Connect(): keep the host's world size
+	Hordes         int     // zombie mode: hordes faced
+	HordeCD        float32 // zombie mode: seconds to the next horde
+	Survived       float32 // zombie mode: seconds alive
+	loading        bool    // Reset called from load(): keep the save's world size
+	joining        bool    // Reset called from Connect(): keep the host's world size
 	Conv           *Conversation
 	VillagerGrudge float32 // seconds left of the village being angry at the player
 	VillagersLost  int
@@ -207,6 +210,21 @@ func (g *Game) Reset() {
 	g.spawnVillagers()
 	g.WarRed, g.WarBlue = false, false
 	g.setupFactions()
+	settings.applyMode()
+	g.Hordes, g.HordeCD, g.Survived = 0, 25, 0
+	switch settings.Mode {
+	case ModeZombie:
+		g.Sky.T = 0.72 // the sun never rises
+		g.say("ZOMBIE MODE  -  the night is endless. Hold out as long as you can.", 5)
+	case ModeBattle:
+		g.WarRed, g.WarBlue = true, true
+		p := g.Player
+		p.SwordTier, p.PickTier, p.ArmorTier = TierIron, TierIron, 2
+		p.Reserve = 96
+		p.Inv[Bow], p.Inv[ArrowItem], p.Inv[Bread], p.Inv[Torch] = 1, 32, 16, 40
+		p.Inv[Cobble] = 64
+		g.say("BATTLE MODE  -  Redfort and Bluehaven march against you. Take every flag.", 5)
+	}
 	g.spawnWolves(4)
 	g.spawnCats(5)
 	g.spawnHorses(5)
@@ -313,6 +331,19 @@ func (g *Game) spawnHostiles(n int) {
 // skeletons from night 3, brutes from night 4.
 func (g *Game) pickKind() EnemyKind {
 	r := rand.Float32()
+	if settings.Mode == ModeZombie {
+		// The dead only: zombies, brutes and spiders in growing numbers.
+		h := g.Hordes
+		switch {
+		case h >= 3 && r < 0.12:
+			return KindBrute
+		case h >= 2 && r < 0.3:
+			return KindSpider
+		case h >= 5 && r < 0.38:
+			return KindSkeleton
+		}
+		return KindZombie
+	}
 	switch {
 	case g.Night >= 4 && r < 0.12:
 		return KindBrute
@@ -1604,8 +1635,21 @@ func (g *Game) worldUpdate(dt float32) {
 	p := g.Player
 	g.assignIDs()
 
-	// Time of day.
+	// Time of day (zombie mode keeps the clock at midnight).
 	g.Sky.Update(dt)
+	if settings.Mode == ModeZombie {
+		g.Sky.T = 0.75
+		g.Survived += dt
+		g.HordeCD -= dt
+		if g.HordeCD <= 0 {
+			g.Hordes++
+			g.HordeCD = 70 + rand.Float32()*20
+			n := int(float32(5+g.Hordes*3) * max(hostileScale(), 0.5))
+			g.spawnHostiles(n)
+			g.announce(fmt.Sprintf("HORDE %d  -  %d of the dead close in", g.Hordes, n), 3.5)
+			g.Audio.Play(g.Audio.Wave, 0.9)
+		}
+	}
 	night := g.Sky.IsNight()
 	if night && !g.WasNight {
 		g.nightfall()
@@ -2476,6 +2520,13 @@ func (g *Game) drawHUD() {
 	if p.Sneak {
 		rl.DrawText("SNEAKING", hx, hy-62, 16, rl.LightGray)
 	}
+	if settings.Mode == ModeZombie {
+		rl.DrawText(fmt.Sprintf("ZOMBIE MODE   horde %d   next in %ds   survived %d:%02d", g.Hordes, int(g.HordeCD), int(g.Survived)/60, int(g.Survived)%60), hx, hy-84, 16, rl.NewColor(120, 220, 120, 255))
+	}
+	if settings.Mode == ModeBattle {
+		c := g.flagCounts()
+		rl.DrawText(fmt.Sprintf("BATTLE MODE   flags: you %d  red %d  blue %d  free %d", c[FactionPlayer], c[FactionRed], c[FactionBlue], c[FactionNone]), hx, hy-84, 16, rl.NewColor(240, 180, 80, 255))
+	}
 	if p.Mounted && g.Mount != nil {
 		rl.DrawText("RIDING  "+animalKinds[g.Mount.Kind].Name+"   SHIFT dismounts", hx, hy-62, 16, rl.SkyBlue)
 	}
@@ -2681,6 +2732,7 @@ func (g *Game) drawHelp(sw, sh int32) {
 		"Horses (plains): feed wheat, bread or apples twice, then right click to ride; SPACE jumps, CTRL gallops, SHIFT dismounts. Boat: 5 planks.",
 		"Outback: red sand, eucalyptus, kangaroos, emus, wombats. Koalas and platypuses are protected. Mind the crocodiles.",
 		"The deep: below the dark stone lie vast caverns, lakes, ravines, glowshrooms, amethyst, diamonds and cave spiders.",
+		"Modes (O on the menu, G in pause): Survival, Creative, Zombie (endless night, growing hordes), Battle (factions at war with you).",
 		"War: Redfort and Bluehaven send warbands to capture flags. Stand by a flag 8s to capture it. Craft a Village Flag to found your own.",
 		"Dinosaurs: brontosaur herds browse the swamp willows, raptor packs and compys roam the outback, the tyrannosaur hunts alone.",
 		"Asteroids fall now and then: heed the warning and its bearing. Mine the meteorite. Trees regrow leaves; pick apples off red-dotted leaves.",
@@ -2830,9 +2882,13 @@ func (g *Game) updateSettings() {
 			rl.StopSound(g.Audio.Music)
 		}
 	case rl.IsKeyPressed(rl.KeyG):
-		settings.Creative = !settings.Creative
+		settings.Mode = (settings.Mode + 1) % numModes
+		settings.applyMode()
 		if !settings.Creative {
 			g.Player.Flying = false
+		}
+		if settings.Mode == ModeBattle {
+			g.WarRed, g.WarBlue = true, true
 		}
 		g.Player.EnsureHeld()
 	case rl.IsKeyPressed(rl.KeyF11):
@@ -2886,7 +2942,7 @@ func (g *Game) drawOverlay() {
 				sizeName = worldSizeNames[i]
 			}
 		}
-		centered("W  new world size: "+sizeName, sh/2+196, 20, rl.LightGray)
+		centered("W  new world size: "+sizeName+"        O  mode: "+modeNames[settings.Mode]+" ("+modeBlurbs[settings.Mode]+")", sh/2+196, 18, rl.LightGray)
 		if g.JoinErr != "" {
 			centered(g.JoinErr, sh/2+222, 18, rl.Orange)
 		}
@@ -2914,7 +2970,7 @@ func (g *Game) drawOverlay() {
 		}
 		centered("B  swap mouse buttons:  "+swap, sh/2+148, 20, rl.White)
 		centered(fmt.Sprintf("D  difficulty  %s", difficultyNames[settings.Difficulty]), sh/2+174, 20, rl.White)
-		mode := "Survival"
+		mode := modeNames[settings.Mode] + ": " + modeBlurbs[settings.Mode]
 		if settings.Creative {
 			mode = "Creative  (double-tap SPACE to fly, SHIFT descends)"
 		}
@@ -2933,7 +2989,11 @@ func (g *Game) drawOverlay() {
 		if g.Player.Cause != "" {
 			centered("You "+g.Player.Cause, sh/2-50, 22, rl.LightGray)
 		}
-		centered(fmt.Sprintf("Score %d    Nights survived %d    Kills %d    Deaths %d", g.Score, g.nightsSurvived(), g.Kills, g.Deaths), sh/2-20, 26, rl.White)
+		if settings.Mode == ModeZombie {
+			centered(fmt.Sprintf("Score %d    Hordes faced %d    Survived %d:%02d    Kills %d", g.Score, g.Hordes, int(g.Survived)/60, int(g.Survived)%60, g.Kills), sh/2-20, 26, rl.White)
+		} else {
+			centered(fmt.Sprintf("Score %d    Nights survived %d    Kills %d    Deaths %d", g.Score, g.nightsSurvived(), g.Kills, g.Deaths), sh/2-20, 26, rl.White)
+		}
 		if g.NewHigh {
 			centered("NEW HIGH SCORE!", sh/2+16, 28, rl.Gold)
 		} else {
@@ -3618,6 +3678,10 @@ func main() {
 				} else {
 					g.State = StateMenu
 				}
+			} else if rl.IsKeyPressed(rl.KeyO) {
+				settings.Mode = (settings.Mode + 1) % numModes
+				settings.applyMode()
+				settings.save()
 			} else if rl.IsKeyPressed(rl.KeyW) {
 				idx := 0
 				for i, n := range worldSizes {

@@ -24,6 +24,31 @@ type Settings struct {
 	Music       bool
 	Antialias   bool
 	WorldSize   int // footprint of newly generated worlds
+	Mode        int // ModeSurvival, ModeCreative, ModeZombie, ModeBattle
+}
+
+const (
+	ModeSurvival = iota
+	ModeCreative
+	ModeZombie
+	ModeBattle
+	numModes
+)
+
+var modeNames = [...]string{"Survival", "Creative", "Zombie", "Battle"}
+var modeBlurbs = [...]string{
+	"mine by day, survive the night, light the beacon",
+	"fly and build freely with every block; nothing can hurt you",
+	"endless night: hordes of the dead grow without end; last as long as you can",
+	"Red and Blue are at war with you from the start; take every flag",
+}
+
+// applyMode keeps the derived creative flag in step with the chosen mode.
+func (s *Settings) applyMode() {
+	if s.Mode < 0 || s.Mode >= numModes {
+		s.Mode = ModeSurvival
+	}
+	s.Creative = s.Mode == ModeCreative
 }
 
 var difficultyNames = [...]string{"Peaceful", "Normal", "Hard"}
@@ -80,6 +105,10 @@ func loadSettings() Settings {
 			s.Name = v
 		case "creative":
 			s.Creative = v == "true"
+		case "mode":
+			if n, err := strconv.Atoi(v); err == nil {
+				s.Mode = n
+			}
 		case "music":
 			s.Music = v == "true"
 		case "antialias":
@@ -94,6 +123,10 @@ func loadSettings() Settings {
 			}
 		}
 	}
+	if s.Creative && s.Mode == ModeSurvival {
+		s.Mode = ModeCreative // older settings files
+	}
+	s.applyMode()
 	return s
 }
 
@@ -105,7 +138,7 @@ func (s Settings) save() {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return
 	}
-	text := fmt.Sprintf("sensitivity=%.2f\nvolume=%.2f\ninvert_y=%t\nfullscreen=%t\nswap_buttons=%t\ndifficulty=%d\nlast_join=%s\nname=%s\ncreative=%t\nmusic=%t\nantialias=%t\nworld_size=%d\n", s.Sensitivity, s.Volume, s.InvertY, s.Fullscreen, s.SwapButtons, s.Difficulty, s.LastJoin, s.Name, s.Creative, s.Music, s.Antialias, s.WorldSize)
+	text := fmt.Sprintf("sensitivity=%.2f\nvolume=%.2f\ninvert_y=%t\nfullscreen=%t\nswap_buttons=%t\ndifficulty=%d\nlast_join=%s\nname=%s\ncreative=%t\nmusic=%t\nantialias=%t\nworld_size=%d\nmode=%d\n", s.Sensitivity, s.Volume, s.InvertY, s.Fullscreen, s.SwapButtons, s.Difficulty, s.LastJoin, s.Name, s.Creative, s.Music, s.Antialias, s.WorldSize, s.Mode)
 	_ = os.WriteFile(p, []byte(text), 0o644)
 }
 

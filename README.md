@@ -40,6 +40,12 @@ block textures and sound effects are generated at startup.
   earned and a list on K. They persist across worlds.
 - Blocks crack progressively as you mine them, and a gentle generated music loop plays in the world
   (N on the pause screen turns it off).
+- **Game modes** (O on the main menu for the next world, G on the pause screen to switch):
+  **Survival** is the normal game. **Creative** lets you fly and build with every block, unharmed.
+  **Zombie** never sees the sun: hordes of the dead come every minute or so and grow without end;
+  the score is how long you last. **Battle** starts you in iron gear with a rifle, bow and bread, with
+  Redfort and Bluehaven already at war with you; their warbands come fast and often, half of them
+  straight for your nearest flag, and the goal is to hold every flag on the map.
 - **Creative mode** (G on the pause screen): double-tap Space to fly (Space up, Shift down, Ctrl fast),
   every block is on the hotbar in unlimited supply, blocks break instantly, and nothing can hurt you.
   Hostiles ignore creative players.

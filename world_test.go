@@ -575,8 +575,9 @@ func TestLocalStateOffline(t *testing.T) {
 
 // Creative mode: no damage, unlimited placeable blocks on the hotbar, instant mining.
 func TestCreativeMode(t *testing.T) {
-	settings.Creative = true
-	defer func() { settings.Creative = false }()
+	settings.Mode = ModeCreative
+	settings.applyMode()
+	defer func() { settings.Mode = ModeSurvival; settings.applyMode() }()
 	p := NewPlayer(rl.Vector3{})
 	p.Hurt(50, "test", true)
 	if p.HP != maxHealth {
@@ -1291,5 +1292,34 @@ func TestFactions(t *testing.T) {
 	}
 	if after != settlers+1 {
 		t.Fatalf("a free bed should attract a settler: %d -> %d", settlers, after)
+	}
+}
+
+// Modes: zombie mode keeps night and spawns hordes; battle mode starts armed and at war.
+func TestModes(t *testing.T) {
+	defer func() { settings.Mode = ModeSurvival; settings.applyMode() }()
+	rand.Seed(28)
+	settings.Mode = ModeZombie
+	g := &Game{Audio: &Audio{}, CraftHover: -1}
+	g.Reset()
+	g.Headless = true
+	g.HordeCD = 0.01
+	before := len(g.Enemies)
+	for i := 0; i < 5; i++ {
+		g.update(0.1)
+	}
+	if !g.Sky.IsNight() || g.Hordes != 1 || len(g.Enemies) <= before {
+		t.Fatalf("zombie mode: night=%v hordes=%d enemies %d->%d", g.Sky.IsNight(), g.Hordes, before, len(g.Enemies))
+	}
+	for _, e := range g.Enemies {
+		if e.Kind == KindCreeper {
+			t.Fatal("zombie mode fields the dead only")
+		}
+	}
+	settings.Mode = ModeBattle
+	g2 := &Game{Audio: &Audio{}, CraftHover: -1}
+	g2.Reset()
+	if !g2.WarRed || !g2.WarBlue || g2.Player.SwordTier != TierIron || g2.Player.Reserve != 96 {
+		t.Fatal("battle mode should start armed and at war")
 	}
 }

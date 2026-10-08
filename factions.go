@@ -238,16 +238,30 @@ func (g *Game) raids(dt float32) {
 			continue
 		}
 		v.RaidCD = 150 + rand.Float32()*120
+		if settings.Mode == ModeBattle {
+			v.RaidCD = 60 + rand.Float32()*40
+		}
 		soldiers := 0
 		for _, a := range g.Animals {
 			if a.Alive && a.Kind == AnimalVillager && a.Warband && a.Faction == v.Faction {
 				soldiers++
 			}
 		}
-		if soldiers >= 6 {
+		if soldiers >= 6 && settings.Mode != ModeBattle || soldiers >= 12 {
 			continue
 		}
 		target := g.raidTarget(v.Faction)
+		if settings.Mode == ModeBattle && rand.Intn(2) == 0 {
+			// Battle mode: half the warbands come straight for the player's nearest flag.
+			best := float32(1e9)
+			for i, f := range g.Flags {
+				if f.Faction != v.Faction {
+					if d := WrapDist(f.Pos, g.Player.Pos); d < best {
+						best, target = d, i
+					}
+				}
+			}
+		}
 		if target < 0 {
 			continue
 		}
