@@ -31,6 +31,9 @@ const (
 	SkinGuard
 	SkinLibrarian
 	SkinWolf
+	SkinCat
+	SkinCatBlack
+	SkinCatTabby
 	SkinKangaroo
 	SkinEmu
 	SkinKoala
@@ -325,6 +328,40 @@ func paintSkin(kind SkinKind, part, face, x, y int) rl.Color {
 			}
 			if face == 0 && (x <= 3 || x >= 12) && y <= 5 {
 				return shade(col(120, 120, 125)) // ears
+			}
+		}
+		return shade(fur)
+	case SkinCat, SkinCatBlack, SkinCatTabby:
+		fur := col(220, 150, 80) // ginger
+		if kind == SkinCatBlack {
+			fur = col(40, 40, 45)
+		}
+		if kind == SkinCatTabby {
+			fur = col(150, 130, 100)
+			if (x/2+y)%4 == 0 && face != 1 {
+				fur = col(95, 80, 60) // stripes
+			}
+		}
+		if face == 1 && kind != SkinCatBlack {
+			fur = col(240, 230, 210)
+		}
+		if part == PartHead {
+			if face == 4 {
+				if y >= 10 && y <= 11 && x >= 7 && x <= 8 {
+					return col(230, 120, 130) // nose
+				}
+				if y >= 7 && y <= 8 && (x == 4 || x == 5 || x == 10 || x == 11) {
+					return col(90, 200, 90) // green eyes with slit pupils
+				}
+				if y >= 7 && y <= 8 && (x == 5 || x == 10) {
+					return col(20, 20, 20)
+				}
+			}
+			if face == 0 && (x <= 3 || x >= 12) && y <= 4 {
+				return shade(fur) // ears
+			}
+			if face == 0 && y <= 4 {
+				return rl.NewColor(0, 0, 0, 0) // notch between the ears
 			}
 		}
 		return shade(fur)

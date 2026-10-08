@@ -55,6 +55,8 @@ type SavedAnimal struct {
 	Tamed      bool
 	Accepted   bool
 	Talks      int
+	Coat       int
+	Sitting    bool
 }
 
 func savePath() string {
@@ -110,7 +112,7 @@ func (g *Game) saveErr() error {
 	}
 	for _, a := range g.Animals {
 		if a.Alive {
-			d.Animals = append(d.Animals, SavedAnimal{a.Kind, a.Pos, a.HP, a.Home, a.Prof, a.Name, a.Quest, a.QuestDone, a.QuestKills, a.Tamed, a.QuestAccepted, a.TalkCount})
+			d.Animals = append(d.Animals, SavedAnimal{a.Kind, a.Pos, a.HP, a.Home, a.Prof, a.Name, a.Quest, a.QuestDone, a.QuestKills, a.Tamed, a.QuestAccepted, a.TalkCount, a.Coat, a.Sitting})
 		}
 	}
 	tmp := p + ".tmp"
@@ -176,6 +178,7 @@ func (g *Game) load() bool {
 		a.Quest, a.QuestDone, a.QuestKills = sa.Quest%len(quests), sa.QuestDone, sa.QuestKills
 		a.Tamed = sa.Tamed
 		a.QuestAccepted, a.TalkCount = sa.Accepted, sa.Talks
+		a.Coat, a.Sitting = sa.Coat, sa.Sitting
 		if a.Kind == AnimalVillager || a.Kind == AnimalWolf {
 			a.Walking = true
 		}

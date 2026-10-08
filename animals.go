@@ -19,6 +19,7 @@ const (
 	AnimalTrader
 	AnimalVillager
 	AnimalWolf
+	AnimalCat
 	AnimalKangaroo
 	AnimalEmu
 	AnimalKoala
@@ -91,13 +92,15 @@ type Animal struct {
 	BubbleT       float32 // seconds the bubble stays
 	BubbleCD      float32
 	// Wolves.
-	Tamed  bool
-	AtkCD  float32
-	Browse float32 // brontosaur: seconds left chewing with the neck raised
-	Phase  float32
-	Alive  bool
-	DeathT float32
-	Lum    float32
+	Tamed   bool
+	AtkCD   float32
+	Browse  float32 // brontosaur: seconds left chewing with the neck raised
+	Sitting bool    // cats: told to stay
+	Coat    int     // cats: colour variant
+	Phase   float32
+	Alive   bool
+	DeathT  float32
+	Lum     float32
 }
 
 func NewAnimal(pos rl.Vector3, kind AnimalKind) *Animal {
@@ -215,6 +218,8 @@ func (a *Animal) Draw(w *World) {
 		kind, scale = SkinSheep, 0.95
 	case AnimalWolf:
 		kind, scale = SkinWolf, 0.8
+	case AnimalCat:
+		kind, scale = SkinCat+SkinKind(a.Coat), 0.55
 	case AnimalKoala:
 		kind, scale = SkinKoala, 0.55
 	case AnimalWombat:
@@ -359,7 +364,26 @@ func (a *Animal) Draw(w *World) {
 	if a.Flee > 4.7 {
 		pose.Flash = (a.Flee - 4.7) / 0.3
 	}
+	if a.Kind == AnimalCat && a.Sitting {
+		pose.Amp = 0
+		pose.Pos.Y -= 0.12 // hunkered down
+	}
 	skins.DrawQuadruped(w, kind, &pose)
+	if a.Kind == AnimalCat && a.Alive {
+		// Tail up, and a collar when tamed.
+		fwd := a.Heading
+		if rl.Vector3Length(fwd) < 0.01 {
+			fwd = rl.NewVector3(0, 0, 1)
+		}
+		tailBase := rl.Vector3Add(rl.NewVector3(a.Pos.X, pose.Pos.Y+0.45*scale, a.Pos.Z), rl.Vector3Scale(fwd, -0.5*scale))
+		sway := float32(math.Sin(float64(rl.GetTime()*3+float64(a.Phase)))) * 0.08
+		tailTip := rl.Vector3Add(tailBase, rl.NewVector3(sway, 0.35*scale, -0.15*scale*fwd.Z))
+		rl.DrawCylinderEx(tailBase, tailTip, 0.05, 0.03, 4, mul(a.Spec.Legs, a.Lum))
+		if a.Tamed {
+			c := rl.Vector3Add(rl.NewVector3(a.Pos.X, pose.Pos.Y+0.42*scale, a.Pos.Z), rl.Vector3Scale(fwd, 0.4*scale))
+			rl.DrawCubeV(c, rl.NewVector3(0.34*scale, 0.08, 0.34*scale), mul(rl.NewColor(60, 120, 220, 255), a.Lum))
+		}
+	}
 	if a.Kind == AnimalWolf && a.Tamed && a.Alive {
 		// Red collar.
 		fwd := a.Heading
@@ -400,6 +424,111 @@ func (g *Game) spawnWolves(n int) {
 		g.Animals = append(g.Animals, wf)
 		n--
 	}
+}
+
+// spawnCats puts stray cats near villages and in forests.
+func (g *Game) spawnCats(n int) {
+	w := g.World
+	for i := 0; i < n*6 && n > 0; i++ {
+		p := w.RandomFreePoint(g.Player.Pos, 10)
+		lx, lz := wrapX(floorI(p.X)-originX), wrapZ(floorI(p.Z)-originZ)
+		nearVillage := false
+		for _, a := range g.Animals {
+			if a.Kind == AnimalVillager && WrapDist(a.Home, p) < 20 {
+				nearVillage = true
+				break
+			}
+		}
+		if !nearVillage && w.Biome[lz*worldW+lx] != BiomeForest {
+			continue
+		}
+		c := NewAnimal(p, AnimalCat)
+		c.Coat = rand.Intn(3)
+		c.Walking = true
+		g.Animals = append(g.Animals, c)
+		n--
+	}
+}
+
+// catTick: pets follow (unless told to sit), keep creepers away, and purr by the fire.
+func (g *Game) catTick(a *Animal, dt float32) {
+	if !a.Tamed {
+		// Strays are shy: back off from a player who comes too close without fish.
+		if WrapDist(g.Player.Pos, a.Pos) < 2.5 && a.Flee == 0 {
+			if h := g.Player.Held; !(h.Kind == ItemFood && h.Block == Fish) {
+				a.Flee = 1.5
+			}
+		}
+		return
+	}
+	a.Flee = 0
+	// Creepers will not come near a cat.
+	for _, e := range g.Enemies {
+		if e.Alive && e.Kind == KindCreeper && WrapDist(e.Pos, a.Pos) < 6 {
+			away := WrapDelta(e.Pos, a.Pos)
+			away.Y = 0
+			if l := rl.Vector3Length(away); l > 0.01 {
+				e.Heading = rl.Vector3Scale(away, 1/l)
+				e.Fuse = 0
+				e.Pos, _ = g.World.MoveBox(e.Pos, e.Spec.Radius, e.Spec.Height, rl.Vector3Scale(e.Heading, 3*dt), true)
+			}
+		}
+	}
+	if a.Sitting {
+		a.Walking = false
+		a.WanderT = 1
+		return
+	}
+	p := g.Player
+	d := WrapDelta(p.Pos, a.Pos)
+	d.Y = 0
+	dist := rl.Vector3Length(d)
+	switch {
+	case dist > 24:
+		a.Pos = rl.Vector3Add(p.Pos, rl.NewVector3(-1.2, 0.2, 1.2))
+	case dist > 3.5:
+		a.Heading = rl.Vector3Scale(d, 1/dist)
+		a.Walking = true
+		a.WanderT = 0.3
+	case dist < 2:
+		a.Walking = false
+		a.WanderT = 0.6
+	}
+}
+
+// tameCat: a fish wins a stray over; right click again to make it sit or follow.
+func (g *Game) tameCat(a *Animal) {
+	p := g.Player
+	if a.Tamed {
+		if p.Held.Kind == ItemFood && p.Held.Block == Fish && a.HP < a.Spec.HP {
+			p.Inv[Fish]--
+			a.HP = a.Spec.HP
+			p.EnsureHeld()
+			g.say("Your cat purrs", 1.2)
+			g.Audio.Play(g.Audio.Purr, 0.6)
+			return
+		}
+		a.Sitting = !a.Sitting
+		if a.Sitting {
+			g.say("Your cat sits and waits here", 1.2)
+		} else {
+			g.say("Your cat follows you", 1.2)
+		}
+		g.Audio.Play(g.Audio.Purr, 0.5)
+		return
+	}
+	if !(p.Held.Kind == ItemFood && p.Held.Block == Fish) {
+		g.say("The cat watches you. It would like a fish.", 1.8)
+		return
+	}
+	p.Inv[Fish]--
+	p.EnsureHeld()
+	a.Flee = 0
+	a.Tamed = true
+	g.burst(rl.Vector3Add(a.Pos, rl.NewVector3(0, 0.6, 0)), rl.NewColor(255, 120, 150, 255), 10)
+	g.Audio.Play(g.Audio.Purr, 0.8)
+	g.say("The cat is yours. It will follow you, and creepers keep their distance from it.", 3.5)
+	g.unlock(AchCat)
 }
 
 // wolfTick: tamed wolves follow their owner and attack nearby hostiles; wild
@@ -532,6 +661,9 @@ func (g *Game) updateAnimals(dt float32) {
 		if a.Alive && a.Kind == AnimalWolf {
 			g.wolfTick(a, dt)
 		}
+		if a.Alive && a.Kind == AnimalCat {
+			g.catTick(a, dt)
+		}
 		if a.Alive && a.Kind >= AnimalKangaroo && a.Kind <= AnimalCrocodile {
 			g.wildlifeTick(a, dt)
 		}
@@ -594,6 +726,15 @@ func (g *Game) updateAnimals(dt float32) {
 		if g.dinoCount() < 8 && rand.Float32() < 0.25 {
 			g.spawnDinos(1)
 		}
+		cats := 0
+		for _, a := range g.Animals {
+			if a.Alive && a.Kind == AnimalCat && !a.Tamed {
+				cats++
+			}
+		}
+		if cats < 3 && rand.Float32() < 0.3 {
+			g.spawnCats(1)
+		}
 		wolves := 0
 		for _, a := range g.Animals {
 			if a.Alive && a.Kind == AnimalWolf && !a.Tamed {
@@ -647,6 +788,11 @@ func (g *Game) killAnimal(a *Animal) {
 	case AnimalWolf:
 		if a.Tamed {
 			g.say("Your wolf has fallen", 2.5)
+		}
+	case AnimalCat:
+		g.Score -= 50
+		if a.Tamed {
+			g.say("Your cat has died", 2.5)
 		}
 	case AnimalVillager:
 		g.Score -= 200

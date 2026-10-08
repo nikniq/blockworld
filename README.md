@@ -61,6 +61,9 @@ block textures and sound effects are generated at startup.
   the world: 5000 points, fireworks and an achievement. The world carries on afterwards.
 - **Wolves** roam the forests and taiga. Feed one meat or fish twice and it is yours: it follows you,
   teleports to catch up, and attacks hostiles near you. Wild wolves bite back if hurt.
+- **Cats**: ginger, black and tabby strays live around villages and in forests and shy away from you
+  unless you hold a fish. Give one a fish and it is your pet: it follows you, teleports to keep up, and
+  creepers will not go near it. Right click it to make it sit and wait, or follow again; a fish heals it.
 - **Fishing**: craft a rod from planks and wool, click at water to cast, and click again when the
   float dips. Mostly fish (food), sometimes seeds or an old boot.
 - **Villages**: a few per world on flat grassland, each a ring of plank or cobblestone houses with doors,

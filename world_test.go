@@ -1085,3 +1085,41 @@ func TestSwampAndBronto(t *testing.T) {
 		t.Fatal("brontosaur should eat the leaves in reach")
 	}
 }
+
+// A fish tames a stray cat; the pet follows, sits on command, and drives creepers off.
+func TestCats(t *testing.T) {
+	rand.Seed(24)
+	g := &Game{Audio: &Audio{}, CraftHover: -1}
+	g.Reset()
+	p := g.Player
+	c := NewAnimal(rl.NewVector3(p.Pos.X+2, p.Pos.Y, p.Pos.Z), AnimalCat)
+	g.Animals = append(g.Animals, c)
+	p.Held = Item{Kind: ItemPickaxe}
+	g.tameCat(c)
+	if c.Tamed {
+		t.Fatal("no fish, no cat")
+	}
+	p.Inv[Fish] = 1
+	p.Held = Item{ItemFood, Fish}
+	g.tameCat(c)
+	if !c.Tamed || p.Inv[Fish] != 0 {
+		t.Fatal("a fish should tame the cat")
+	}
+	p.Pos.X += 10
+	g.catTick(c, 0.1)
+	if !c.Walking {
+		t.Fatal("pet should follow")
+	}
+	g.tameCat(c)
+	if !c.Sitting {
+		t.Fatal("right click should make it sit")
+	}
+	e := NewEnemy(rl.NewVector3(c.Pos.X+2, c.Pos.Y, c.Pos.Z), KindCreeper, 1)
+	e.Fuse = 1
+	g.Enemies = append(g.Enemies, e)
+	before := WrapDist(e.Pos, c.Pos)
+	g.catTick(c, 0.1)
+	if e.Fuse != 0 || WrapDist(e.Pos, c.Pos) <= before {
+		t.Fatal("creepers should back away from a cat")
+	}
+}

@@ -194,6 +194,7 @@ func (g *Game) Reset() {
 	g.spawnDinosaur()
 	g.spawnVillagers()
 	g.spawnWolves(4)
+	g.spawnCats(5)
 	g.spawnWildlife(12)
 	g.spawnWaterLife(6)
 	g.spawnDinos(4)
@@ -1419,7 +1420,7 @@ func (g *Game) update(dt float32) {
 	if usePressed() && g.State == StatePlaying {
 		ray := rl.NewRay(p.Eye(), p.Forward())
 		for _, an := range g.Animals {
-			if !an.Alive || (an.Kind != AnimalTrader && an.Kind != AnimalVillager && an.Kind != AnimalWolf) {
+			if !an.Alive || (an.Kind != AnimalTrader && an.Kind != AnimalVillager && an.Kind != AnimalWolf && an.Kind != AnimalCat) {
 				continue
 			}
 			bb := an.BB()
@@ -1429,6 +1430,10 @@ func (g *Game) update(dt float32) {
 			if c := rl.GetRayCollisionBox(ray, bb); c.Hit && c.Distance < 4 {
 				if an.Kind == AnimalWolf {
 					g.tameWolf(an)
+					return
+				}
+				if an.Kind == AnimalCat {
+					g.tameCat(an)
 					return
 				}
 				if an.Kind == AnimalTrader {
@@ -2558,7 +2563,7 @@ func (g *Game) drawHelp(sw, sh int32) {
 		"K achievements   N (pause) music on/off      Doors: 4 planks, right click to open. Trader: right click to trade",
 		"Villages: right click a villager (?) for a quest. Guards fight the undead; keep the others safe.",
 		"Goal: find the ancient beacon tower (see the compass) and light it with 3 diamond ore.",
-		"Wolves: feed one meat or fish twice to tame it. Fishing rod: planks and wool; cast at water.",
+		"Wolves: feed one meat or fish twice to tame it. Cats: a fish tames one; right click to sit or follow. Fishing rod: planks and wool.",
 		"Outback: red sand, eucalyptus, kangaroos, emus, wombats. Koalas and platypuses are protected. Mind the crocodiles.",
 		"The deep: below the dark stone lie vast caverns, lakes, ravines, glowshrooms, amethyst, diamonds and cave spiders.",
 		"Dinosaurs: brontosaur herds browse the swamp willows, raptor packs and compys roam the outback, the tyrannosaur hunts alone.",

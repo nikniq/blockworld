@@ -37,6 +37,7 @@ type Audio struct {
 	Roar     rl.Sound
 	Laugh    rl.Sound
 	Alarm    rl.Sound
+	Purr     rl.Sound
 	Thunder  rl.Sound
 	Rain     rl.Sound
 	Rattle   rl.Sound
@@ -134,6 +135,9 @@ func NewAudio() *Audio {
 		crack := noise() * exp(14, t) * 0.9
 		rumble := (noise()*0.5 + sin(38, t)*0.4) * float32(math.Exp(-float64((t-0.3)*1.6))) * float32(math.Min(1, float64(t*3)))
 		return crack + rumble*0.7
+	})
+	a.Purr = a.synth(1.2, func(t float32) float32 {
+		return (sin(28, t)*0.5 + noise()*0.15) * (0.6 + 0.4*sin(6, t)) * float32(math.Sin(float64(t/1.2*math.Pi))) * 0.6
 	})
 	a.Alarm = a.synth(1.6, func(t float32) float32 {
 		f := float32(520)
