@@ -25,6 +25,9 @@ const (
 	AnimalWombat
 	AnimalPlatypus
 	AnimalCrocodile
+	AnimalBronto
+	AnimalRaptor
+	AnimalCompy
 	numAnimalKinds
 )
 
@@ -55,6 +58,9 @@ var animalKinds = [...]animalSpec{
 	AnimalWombat:    {"Wombat", 12, 1.3, 0.4, 0.7, rl.NewColor(110, 85, 65, 255), rl.NewColor(115, 90, 70, 255), rl.NewColor(90, 70, 55, 255), 0, 0},
 	AnimalPlatypus:  {"Platypus", 5, 1.6, 0.25, 0.3, rl.NewColor(110, 75, 50, 255), rl.NewColor(230, 180, 100, 255), rl.NewColor(100, 70, 45, 255), 0, 0},
 	AnimalCrocodile: {"Crocodile", 30, 1.5, 0.5, 0.5, rl.NewColor(80, 100, 60, 255), rl.NewColor(90, 110, 65, 255), rl.NewColor(70, 90, 55, 255), 2, 12},
+	AnimalBronto:    {"Brontosaurus", 120, 1.1, 1.3, 4.5, rl.NewColor(95, 125, 90, 255), rl.NewColor(105, 135, 95, 255), rl.NewColor(80, 105, 75, 255), 14, 0},
+	AnimalRaptor:    {"Raptor", 12, 4.6, 0.3, 1.1, rl.NewColor(150, 110, 60, 255), rl.NewColor(160, 120, 65, 255), rl.NewColor(120, 90, 50, 255), 2, 7},
+	AnimalCompy:     {"Compy", 3, 3.5, 0.18, 0.45, rl.NewColor(120, 150, 70, 255), rl.NewColor(130, 160, 75, 255), rl.NewColor(100, 130, 60, 255), 1, 0},
 }
 
 type Animal struct {
@@ -87,6 +93,7 @@ type Animal struct {
 	// Wolves.
 	Tamed  bool
 	AtkCD  float32
+	Browse float32 // brontosaur: seconds left chewing with the neck raised
 	Phase  float32
 	Alive  bool
 	DeathT float32
@@ -293,10 +300,19 @@ func (a *Animal) Draw(w *World) {
 		}
 		skins.DrawHumanoid(w, SkinTrader, &pose)
 		return
-	case AnimalDino:
+	case AnimalDino, AnimalBronto, AnimalRaptor, AnimalCompy:
 		pose := Pose{Pos: a.Pos, Yaw: yawOf(a.Heading), Phase: a.Phase, Amp: 0, Scale: 1, Lum: a.Lum, Alpha: 1}
 		if a.Walking || a.Flee > 0 {
 			pose.Amp = 1
+		}
+		if a.Kind == AnimalBronto {
+			pose.Pitch = -a.Browse * 0.4 // neck up while eating
+			if a.Browse > 0 {
+				pose.Swing = clamp(float32(math.Sin(float64(rl.GetTime()*6))), 0, 1)
+			}
+		}
+		if a.Kind == AnimalCompy {
+			pose.Scale = 0.4
 		}
 		if !a.Alive {
 			pose.Death = clamp(a.DeathT*2.5, 0, 1)
@@ -309,8 +325,16 @@ func (a *Animal) Draw(w *World) {
 		if a.Flee > 13.7 {
 			pose.Flash = (a.Flee - 13.7) / 0.3
 		}
-		pose.Swing = clamp(a.BiteCD-0.9, 0, 0.4) / 0.4 // jaw snap just after a bite
-		skins.DrawDino(w, &pose)
+		switch a.Kind {
+		case AnimalBronto:
+			skins.DrawBronto(w, &pose)
+		case AnimalRaptor, AnimalCompy:
+			pose.Swing = clamp(a.BiteCD-0.9, 0, 0.4) / 0.4
+			skins.DrawRaptor(w, &pose)
+		default:
+			pose.Swing = clamp(a.BiteCD-0.9, 0, 0.4) / 0.4 // jaw snap just after a bite
+			skins.DrawDino(w, &pose)
+		}
 		if a.Alive && a.HP < a.Spec.HP {
 			top := a.Pos.Y + a.Spec.Height + 0.2
 			frac := float32(a.HP) / float32(a.Spec.HP)
@@ -508,8 +532,11 @@ func (g *Game) updateAnimals(dt float32) {
 		if a.Alive && a.Kind == AnimalWolf {
 			g.wolfTick(a, dt)
 		}
-		if a.Alive && a.Kind >= AnimalKangaroo {
+		if a.Alive && a.Kind >= AnimalKangaroo && a.Kind <= AnimalCrocodile {
 			g.wildlifeTick(a, dt)
+		}
+		if a.Alive && a.Kind >= AnimalBronto {
+			g.dinoTick(a, dt)
 		}
 		t := g.nearestTarget(a.Pos)
 		if bite := a.Update(dt, g.World, t); bite > 0 {
@@ -556,13 +583,16 @@ func (g *Game) updateAnimals(dt float32) {
 		}
 		wild := 0
 		for _, a := range g.Animals {
-			if a.Alive && a.Kind >= AnimalKangaroo {
+			if a.Alive && a.Kind >= AnimalKangaroo && a.Kind <= AnimalCrocodile {
 				wild++
 			}
 		}
 		if wild < 12 && rand.Float32() < 0.4 {
 			g.spawnWildlife(2)
 			g.spawnWaterLife(1)
+		}
+		if g.dinoCount() < 8 && rand.Float32() < 0.25 {
+			g.spawnDinos(1)
 		}
 		wolves := 0
 		for _, a := range g.Animals {
@@ -628,7 +658,16 @@ func (g *Game) killAnimal(a *Animal) {
 		g.spawnDrop(c, Leather, 0)
 		g.spawnDrop(c, Leather, 0)
 		g.spawnDrop(c, Leather, 0)
-		g.announce("DINOSAUR SLAIN  +800", 3)
+		g.announce("TYRANNOSAUR SLAIN  +800", 3)
+	case AnimalBronto:
+		g.Score += 400
+		for i := 0; i < 4; i++ {
+			g.spawnDrop(c, Leather, 0)
+		}
+		g.announce("Brontosaurus slain  +400", 3)
+	case AnimalRaptor:
+		g.Score += 120
+		g.spawnDrop(c, Leather, 0)
 	case AnimalSheep:
 		g.spawnDrop(c, Wool, 0)
 		g.spawnDrop(c, Wool, 0)

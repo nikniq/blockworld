@@ -37,6 +37,8 @@ const (
 	SkinWombat
 	SkinPlatypus
 	SkinCroc
+	SkinBronto
+	SkinRaptor
 	numSkins
 )
 
@@ -404,6 +406,39 @@ func paintSkin(kind SkinKind, part, face, x, y int) rl.Color {
 			}
 		}
 		return shade(scale)
+	case SkinBronto:
+		hide := col(95, 125, 90)
+		if (x/3+y/3)%2 == 0 {
+			hide = col(85, 112, 82)
+		}
+		if face == 1 {
+			hide = col(150, 160, 120)
+		}
+		if part == PartHead && face == 4 {
+			if y >= 11 && x >= 5 && x <= 10 {
+				return col(50, 60, 45) // mouth
+			}
+			return eyes(hide, col(20, 20, 20), false)
+		}
+		return shade(hide)
+	case SkinRaptor:
+		hide := col(150, 110, 60)
+		if y%4 == 0 && face != 1 {
+			hide = col(110, 75, 40) // stripes
+		}
+		if face == 1 {
+			hide = col(200, 175, 130)
+		}
+		if part == PartHead && face == 4 {
+			if y >= 10 && x%2 == 0 {
+				return rl.NewColor(240, 240, 230, 255) // teeth
+			}
+			return eyes(hide, col(240, 200, 40), false)
+		}
+		if part == PartLegFL {
+			return shade(col(60, 50, 40)) // claw
+		}
+		return shade(hide)
 	case SkinSheep:
 		wool := col(232, 232, 226)
 		if part == PartHead {

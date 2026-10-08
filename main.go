@@ -196,6 +196,7 @@ func (g *Game) Reset() {
 	g.spawnWolves(4)
 	g.spawnWildlife(12)
 	g.spawnWaterLife(6)
+	g.spawnDinos(4)
 	g.Won = false
 	g.Asteroid = Asteroid{}
 	g.AsteroidCD = asteroidEvery * 0.5
@@ -2560,6 +2561,7 @@ func (g *Game) drawHelp(sw, sh int32) {
 		"Wolves: feed one meat or fish twice to tame it. Fishing rod: planks and wool; cast at water.",
 		"Outback: red sand, eucalyptus, kangaroos, emus, wombats. Koalas and platypuses are protected. Mind the crocodiles.",
 		"The deep: below the dark stone lie vast caverns, lakes, ravines, glowshrooms, amethyst, diamonds and cave spiders.",
+		"Dinosaurs: brontosaur herds browse the swamp willows, raptor packs and compys roam the outback, the tyrannosaur hunts alone.",
 		"Asteroids fall now and then: heed the warning and its bearing. Mine the meteorite. Trees regrow leaves; pick apples off red-dotted leaves.",
 		"H closes this help",
 	}
@@ -3133,8 +3135,8 @@ func (g *Game) scriptedShots(frame int) bool {
 		g.Player.Pitch = 0.08
 		g.Player.HoldBlock(Planks)
 	case 180:
-		g.Sky.Raining, g.Sky.Rain = true, 1
-		g.ShowHelp = true
+		g.Sky.Raining, g.Sky.Rain = false, 0
+		g.ShowHelp = false
 		{
 			d := rl.Vector3Add(g.Player.Pos, rl.Vector3Scale(g.Player.FlatForward(), 3))
 			d.X += 2
@@ -3144,9 +3146,13 @@ func (g *Game) scriptedShots(frame int) bool {
 			t.WanderT = 99
 			g.Animals = append(g.Animals, t)
 		}
-		for i, k := range []AnimalKind{AnimalKangaroo, AnimalEmu, AnimalKoala, AnimalCrocodile, AnimalWombat, AnimalPlatypus, AnimalDino} {
-			p := rl.Vector3Add(g.Player.Pos, rl.Vector3Scale(g.Player.FlatForward(), 4+float32(i)*0.8))
-			p.X += float32(i)*1.6 - 5
+		for i, k := range []AnimalKind{AnimalRaptor, AnimalCompy, AnimalKangaroo, AnimalEmu, AnimalDino, AnimalBronto} {
+			p := rl.Vector3Add(g.Player.Pos, rl.Vector3Scale(g.Player.FlatForward(), 4+float32(i)*1.5))
+			p.X += float32(i)*2.5 - 6
+			if k == AnimalBronto {
+				p = rl.Vector3Add(g.Player.Pos, rl.Vector3Scale(g.Player.FlatForward(), 12))
+				p.X += 4
+			}
 			if k == AnimalDino {
 				p = rl.Vector3Add(g.Player.Pos, rl.Vector3Scale(g.Player.FlatForward(), 6))
 				p.X -= 3

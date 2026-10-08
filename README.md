@@ -51,9 +51,11 @@ block textures and sound effects are generated at startup.
   Stone needs a pickaxe tier; iron ore needs stone, gold and diamond ore need iron.
 - **Crafting (E)**: logs to planks, torches, TNT, ladders, beds, cobblestone to stone bricks, sand to glass, ore to rifle ammo,
   and stone/iron/diamond swords and pickaxes. Better pickaxes mine faster; better swords hit harder.
-- **A dinosaur** roams every world: a striped, two-legged beast three blocks tall that thuds as it walks
-  and roars across the valley. Leave it alone and it ignores you. Hurt it and it charges and bites for
-  serious damage until it loses interest. Slaying it is worth 800 points, eight meat and leather.
+- **Dinosaurs** of several sizes. A tyrannosaur roams every world: three blocks tall, it thuds and
+  roars, ignores you until hurt, then charges and bites. Brontosaur herds live in the **swamps**, a new
+  biome of mud, pools, reeds, marsh lights and drooping willows: they are twice the tyrannosaur's size,
+  crane their necks up to browse the willow leaves (and sometimes shake loose an apple), and are docile
+  unless attacked. Raptor packs hunt together across the outback, and tiny compys scatter underfoot.
 - **The goal**: an ancient beacon tower stands far from spawn (the compass shows its bearing and
   distance, and the map marks it). Climb it and light the beacon with three diamond ore to conquer
   the world: 5000 points, fireworks and an achievement. The world carries on afterwards.

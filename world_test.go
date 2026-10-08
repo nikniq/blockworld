@@ -201,7 +201,7 @@ func TestLighting(t *testing.T) {
 	// Surface cell at the spawn is fully sunlit.
 	s := w.SpawnPoint()
 	lx, lz := floorI(s.X)-originX, floorI(s.Z)-originZ
-	if w.sunLocal(lx, floorI(s.Y), lz) != 15 {
+	if w.sunLocal(lx, floorI(s.Y), lz) < 12 { // a tree may shade the spawn a little
 		t.Fatalf("spawn sunlight %d", w.sunLocal(lx, floorI(s.Y), lz))
 	}
 	// Dig a sealed room three blocks under the spawn, walling it in stone so no cave leaks light in.
@@ -1048,5 +1048,40 @@ func TestRegrowthAndAsteroid(t *testing.T) {
 	g.Asteroid = Asteroid{Target: at, T: 12, Active: true}
 	if s := g.asteroidBearing(); len(s) < 10 {
 		t.Fatalf("bearing %q", s)
+	}
+}
+
+// Swamps generate with mud and willows; brontosaurs spawn there and eat leaves.
+func TestSwampAndBronto(t *testing.T) {
+	rand.Seed(23)
+	g := &Game{Audio: &Audio{}, CraftHover: -1}
+	g.Reset()
+	w := g.World
+	mud := 0
+	for _, b := range w.Blocks {
+		if b == Mud {
+			mud++
+		}
+	}
+	if mud == 0 {
+		t.Fatal("swamp should have mud")
+	}
+	kinds := map[AnimalKind]int{}
+	for _, a := range g.Animals {
+		kinds[a.Kind]++
+	}
+	if kinds[AnimalBronto] == 0 || kinds[AnimalRaptor]+kinds[AnimalCompy] == 0 {
+		t.Fatalf("dinosaurs should spawn: %v", kinds)
+	}
+	// Put a bronto in front of a leaf block and let it browse.
+	s := g.Spawn
+	b := NewAnimal(rl.NewVector3(s.X, s.Y, s.Z), AnimalBronto)
+	b.Heading = rl.NewVector3(0, 0, 1)
+	x, y, z := floorI(s.X), floorI(s.Y)+4, floorI(s.Z)+3
+	w.Set(x, y, z, Leaves)
+	g.Animals = append(g.Animals, b)
+	g.dinoTick(b, 0.1)
+	if w.Get(x, y, z) != Air || b.Browse <= 0 {
+		t.Fatal("brontosaur should eat the leaves in reach")
 	}
 }

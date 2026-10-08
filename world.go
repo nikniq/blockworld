@@ -74,6 +74,7 @@ const (
 	Fish
 	Rod
 	DeepStone
+	Mud
 	Meteorite
 	FruitLeaves
 	Glowshroom
@@ -138,6 +139,7 @@ const (
 	BiomeDesert
 	BiomeTaiga
 	BiomeOutback
+	BiomeSwamp
 )
 
 // ladderBox leans a ladder against the first solid wall beside it: a thin
@@ -263,6 +265,8 @@ var blocks = [numBlocks]blockInfo{
 		Pat: [3]texPattern{PatFish, PatFish, PatFish}, MineTime: 0.1, Drops: Fish, Food: 5},
 	Rod: {Name: "Fishing Rod", Top: col(130, 90, 50), Side: col(130, 90, 50), Bottom: col(130, 90, 50),
 		Pat: [3]texPattern{PatRod, PatRod, PatRod}, MineTime: 0.1, Drops: Rod, Item: true},
+	Mud: {Name: "Mud", Top: col(70, 60, 45), Side: col(70, 60, 45), Bottom: col(65, 55, 40),
+		Pat: [3]texPattern{PatNoise, PatNoise, PatNoise}, MineTime: 0.4, Drops: Mud, Solid: true},
 	Meteorite: {Name: "Meteorite", Top: col(60, 55, 60), Side: col(55, 50, 55), Bottom: col(50, 45, 50),
 		Pat: [3]texPattern{PatMeteor, PatMeteor, PatMeteor}, MineTime: 4, Hard: true, MinTier: TierStone, Drops: Meteorite, Solid: true, Emit: 4},
 	FruitLeaves: {Name: "Apple Tree Leaves", Top: col(58, 132, 48), Side: col(54, 124, 46), Bottom: col(48, 110, 42),
@@ -660,9 +664,11 @@ func biomeAt(x, z int, seed int) Biome {
 		return BiomeDesert
 	case b < 0.36:
 		return BiomeOutback
-	case b < 0.52:
+	case b < 0.5:
 		return BiomePlains
-	case b < 0.74:
+	case b < 0.6:
+		return BiomeSwamp
+	case b < 0.78:
 		return BiomeForest
 	}
 	return BiomeTaiga
@@ -689,11 +695,19 @@ func (w *World) generate(seed int) {
 				h = int(lerp(groundBase+14, float32(h), t*t))
 			}
 			h = int(clamp(float32(h), groundBase+5, worldH-8))
-			heights[z*worldW+x] = h
 			biome := biomeAt(x, z, seed)
 			biomes[z*worldW+x] = biome
-			sandy := h <= seaLevel+2 || biome == BiomeDesert
+			if biome == BiomeSwamp {
+				// Flatten toward just above the sea, with scattered pools cut a block below it.
+				h = int(lerp(float32(h), seaLevel+2, 0.8))
+				if pnoise(fx/9, fz/9, seed+21, worldW/9, worldD/9) > 0.6 {
+					h = seaLevel
+				}
+			}
+			heights[z*worldW+x] = h
+			sandy := (h <= seaLevel+2 && biome != BiomeSwamp) || biome == BiomeDesert
 			outback := biome == BiomeOutback && h > seaLevel+2
+			swamp := biome == BiomeSwamp
 			for y := 0; y < h; y++ {
 				b := Stone
 				switch {
@@ -701,7 +715,9 @@ func (w *World) generate(seed int) {
 					b = Bedrock
 				case y == h-1:
 					b = Grass
-					if sandy {
+					if swamp && (h <= seaLevel || hash2(x, z, seed+22) < 0.35) {
+						b = Mud
+					} else if sandy {
 						b = Sand
 					} else if outback {
 						b = RedSand
@@ -710,7 +726,9 @@ func (w *World) generate(seed int) {
 					}
 				case y >= h-4:
 					b = Dirt
-					if sandy {
+					if swamp && y >= h-2 {
+						b = Mud
+					} else if sandy {
 						b = Sand
 					} else if outback && y >= h-3 {
 						b = RedSand
@@ -871,6 +889,15 @@ func (w *World) generate(seed int) {
 		case BiomeTaiga:
 			if (top == Grass || top == Snow) && r < 0.3 {
 				w.placeSpruce(x, h, z, w.setLocal)
+			}
+		case BiomeSwamp:
+			switch {
+			case (top == Grass || top == Mud) && h > seaLevel && r < 0.09:
+				w.placeWillow(x, h, z, w.setLocal)
+			case (top == Grass || top == Mud) && r < 0.5:
+				w.setLocal(x, h, z, TallGrass)
+			case top == Mud && h <= seaLevel+1 && r < 0.6:
+				w.setLocal(x, h, z, Glowshroom) // marsh lights
 			}
 		case BiomeOutback:
 			switch {
@@ -1070,6 +1097,37 @@ func (w *World) placeEucalyptus(x, y, z int, set func(x, y, z int, b Block)) {
 					}
 					if w.getLocal(cx+dx, cy+dy, cz+dz) == Air {
 						set(cx+dx, cy+dy, cz+dz, EucLeaves)
+					}
+				}
+			}
+		}
+	}
+}
+
+// placeWillow writes a squat trunk with a wide, drooping canopy that hangs
+// down around it: plenty of leaves for a brontosaur to reach.
+func (w *World) placeWillow(x, y, z int, set func(x, y, z int, b Block)) {
+	th := 4 + rand.Intn(2)
+	for yy := y; yy < y+th; yy++ {
+		set(x, yy, z, Log)
+	}
+	top := y + th - 1
+	for dz := -3; dz <= 3; dz++ {
+		for dx := -3; dx <= 3; dx++ {
+			d := abs(dx) + abs(dz)
+			if d > 4 {
+				continue
+			}
+			for dy := 0; dy <= 1; dy++ {
+				if w.getLocal(x+dx, top+dy, z+dz) == Air {
+					set(x+dx, top+dy, z+dz, Leaves)
+				}
+			}
+			// Hanging strands on the rim.
+			if d >= 3 {
+				for dy := -1; dy >= -2-rand.Intn(2); dy-- {
+					if w.getLocal(x+dx, top+dy, z+dz) == Air {
+						set(x+dx, top+dy, z+dz, Leaves)
 					}
 				}
 			}
@@ -1703,7 +1761,8 @@ void main() {
         else if (code > 248.5) biome = vec3(0.72, 1.0, 0.66);   // forest
         else if (code > 247.5) biome = vec3(1.0, 0.92, 0.55);   // desert
         else if (code > 246.5) biome = vec3(0.66, 0.96, 0.88);  // taiga
-        else biome = vec3(0.95, 0.85, 0.55);                    // outback
+        else if (code > 245.5) biome = vec3(0.95, 0.85, 0.55);  // outback
+        else biome = vec3(0.6, 0.72, 0.5);                      // swamp
         t.rgb *= biome;
     } else {
         va = fragColor.a;
@@ -2125,7 +2184,7 @@ func (w *World) RandomFreePoint(from rl.Vector3, minDist float32) rl.Vector3 {
 		if h != w.Height[lz*worldW+lx] || h <= seaLevel {
 			continue // under water or under a canopy
 		}
-		if g := w.getLocal(lx, h-1, lz); g == Leaves || g == SpruceLeaves || g == EucLeaves || g == Log || g == BirchLog || g == EucLog {
+		if g := w.getLocal(lx, h-1, lz); g == Leaves || g == SpruceLeaves || g == EucLeaves || g == FruitLeaves || g == Log || g == BirchLog || g == EucLog {
 			continue // on top of a tree
 		}
 		p := rl.NewVector3(float32(lx+originX)+0.5, float32(h), float32(lz+originZ)+0.5)
