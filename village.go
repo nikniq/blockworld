@@ -304,6 +304,7 @@ func (g *Game) hurtVillager(id uint32, amount int, from rl.Vector3) {
 		if a.Alive && a.Kind == AnimalVillager && a.ID == (id&^villagerIDBit) {
 			if a.Hit(amount) {
 				g.announce(a.Name+" the "+professionNames[a.Prof]+" was slain", 3)
+				g.VillagersLost++
 			} else {
 				a.Flee = 4 // run (guards use Flee as a short retreat too)
 			}
@@ -312,7 +313,24 @@ func (g *Game) hurtVillager(id uint32, amount int, from rl.Vector3) {
 	}
 }
 
-// ---------- dialogue ----------
+// ---------- conversation ----------
+
+// A conversation is the villager's current line plus the choices the player
+// can pick with the number keys or a click. Lines depend on profession, time
+// of day, weather, what has happened lately and whether the villager likes you.
+
+type Choice struct {
+	Label string
+	Do    func()
+}
+
+type Conversation struct {
+	NPC     *Animal
+	Line    string
+	Choices []Choice
+}
+
+func pick(lines ...string) string { return lines[rand.Intn(len(lines))] }
 
 // questStatus reports what the player can do about a villager's quest.
 func (g *Game) questStatus(a *Animal) (done bool, ready bool, progress string) {
@@ -331,77 +349,288 @@ func (g *Game) questStatus(a *Animal) (done bool, ready bool, progress string) {
 	return false, p.Inv[q.Need] >= q.NeedN, fmt.Sprintf("you have %d of %d %s", p.Inv[q.Need], q.NeedN, blocks[q.Need].Name)
 }
 
+// villagerMood summarises how the villager feels about things right now.
+func (g *Game) villagerMood(a *Animal) string {
+	switch {
+	case g.VillagerGrudge > 0:
+		return "angry"
+	case a.HP < a.Spec.HP/2:
+		return "hurt"
+	case g.Sky.IsNight():
+		return "nervous"
+	case g.Sky.Rain > 0.5:
+		return "damp"
+	case a.QuestDone:
+		return "grateful"
+	}
+	return "cheerful"
+}
+
 func (g *Game) talkTo(a *Animal) {
 	g.Talking = a
 	g.State = StateDialog
 	rl.EnableCursor()
-	q := &quests[a.Quest]
-	if q.Kills > 0 && a.QuestKills < 0 {
-		a.QuestKills = g.Kills // start counting from now
+	a.TalkCount++
+	g.converse(a, g.greeting(a))
+}
+
+// converse sets the line and the standard topic menu.
+func (g *Game) converse(a *Animal, line string) {
+	c := &Conversation{NPC: a, Line: line}
+	if g.VillagerGrudge > 0 {
+		c.Choices = []Choice{
+			{"I am sorry.", func() { g.converse(a, pick("Sorry does not bring them back. Leave us be.", "Go. We will not forget.")) }},
+			{"Goodbye.", g.endTalk},
+		}
+		g.Conv = c
+		return
+	}
+	done, ready, _ := g.questStatus(a)
+	work := "Any work for me?"
+	if !done && a.QuestAccepted {
+		work = "About the job..."
+		if ready {
+			work = "I have what you asked for."
+		}
+	} else if done {
+		work = "Anything else I can do?"
+	}
+	c.Choices = []Choice{
+		{"How are things in the village?", func() { g.converse(a, g.gossip(a)) }},
+		{work, func() { g.questTalk(a) }},
+		{"Tell me about this land.", func() { g.converse(a, g.lore(a)) }},
+		{"Goodbye.", g.endTalk},
+	}
+	g.Conv = c
+}
+
+func (g *Game) endTalk() {
+	g.State = StatePlaying
+	g.Talking = nil
+	g.Conv = nil
+	rl.DisableCursor()
+	rl.GetMouseDelta()
+}
+
+func (g *Game) greeting(a *Animal) string {
+	name := playerName
+	if g.Net != nil {
+		name = g.Net.Name
+	}
+	switch g.villagerMood(a) {
+	case "angry":
+		return pick("You. You killed one of ours.", "Keep your distance, murderer.")
+	case "hurt":
+		return pick("Careful... I am not well. Something got its teeth in me.", "I need rest. The night was cruel.")
+	case "nervous":
+		return pick("You should be indoors! They come out at night.", "Keep your voice down. The dead have good ears.", "Is that a torch? Bless you, keep it lit.")
+	case "damp":
+		return pick("Wet enough for you? The crops like it, at least.", "Mind the lightning out there.")
+	case "grateful":
+		return pick(fmt.Sprintf("%s! Good to see you again.", name), "Our hero returns. What can I do for you?")
+	}
+	if a.TalkCount <= 1 {
+		return pick(fmt.Sprintf("A stranger! I am %s, the %s here. You must be %s.", a.Name, professionNames[a.Prof], name),
+			fmt.Sprintf("Welcome, traveller. %s is the name. I keep the village %s.", a.Name, map[Profession]string{ProfFarmer: "fed", ProfGuard: "safe", ProfLibrarian: "learned"}[a.Prof]))
+	}
+	return pick(fmt.Sprintf("Hello again, %s.", name), "Fine day for it.", "Back so soon?", fmt.Sprintf("%s! Pull up a chair.", name))
+}
+
+func (g *Game) gossip(a *Animal) string {
+	alive, guards := 0, 0
+	for _, v := range g.Animals {
+		if v.Alive && v.Kind == AnimalVillager && WrapDist(v.Home, a.Home) < 40 {
+			alive++
+			if v.Prof == ProfGuard {
+				guards++
+			}
+		}
+	}
+	lines := []string{fmt.Sprintf("There are %d of us left here, %d with a sword.", alive, guards)}
+	if g.Night > 0 {
+		lines = append(lines, fmt.Sprintf("We have lived through %d nights of this. Each one is longer than the last.", g.Night))
+	}
+	if g.VillagersLost > 0 {
+		lines = append(lines, fmt.Sprintf("We buried %d since the dead started walking. Do not add to the count.", g.VillagersLost))
+	}
+	if g.traderAlive() {
+		lines = append(lines, "That trader in the purple robe is back. His prices are robbery, but he has things we cannot make.")
+	}
+	if g.World.BeaconLit {
+		lines = append(lines, "The beacon on the tower burns again! Grandmother said it never would.")
+	} else if g.Sky.Day >= 2 {
+		lines = append(lines, "Have you seen the old tower with the dead light on top? Nobody goes there anymore.")
+	}
+	if a.Prof == ProfFarmer {
+		lines = append(lines, "Wheat is slow this year. If you find seeds, plant them in the sun.")
+	}
+	if g.Sky.Rain > 0.5 {
+		lines = append(lines, "Rain again. The well will be full, the roads a mess.")
+	}
+	if settings.Difficulty == 2 {
+		lines = append(lines, "They say the dead are fiercer in these parts. They say right.")
+	}
+	return pick(lines...)
+}
+
+func (g *Game) lore(a *Animal) string {
+	switch a.Prof {
+	case ProfFarmer:
+		return pick("The soil here is good. Grass, dirt, a bit of sun, and seeds will take. Wheat makes bread, bread keeps you walking.",
+			"Cows give leather, sheep give wool. A bed needs wool, so be kind to the sheep.",
+			"Out past the forest the ground turns red and the trees go pale. Strange beasts hop about there.")
+	case ProfGuard:
+		return pick("Light keeps them away. Torches around the walls and nothing climbs out of the dark near your door.",
+			"Under the hills there are old rooms with iron cages that breathe out zombies. Smash the cage and the breathing stops.",
+			"The green ones that hiss: do not let them get close. Shoot them, or run.",
+			"A closed door stops a zombie. It does not stop the thing that walks on every fifth night.")
+	default:
+		return pick("The tower was built by whoever was here before us. The light on top wants diamonds, three of them, so the book says.",
+			"There are timbered tunnels in the rock, left by miners long gone. Crates still sit in them.",
+			"The world is round, you know. Walk far enough in one direction and you will see your own back.",
+			"Lightning seeks the high ground. Build low, or build in stone.")
 	}
 }
 
+// questTalk handles offering, progress and hand-in for the villager's quest.
+func (g *Game) questTalk(a *Animal) {
+	q := &quests[a.Quest]
+	done, ready, progress := g.questStatus(a)
+	switch {
+	case done:
+		g.converse(a, pick("You have done enough for me. Ask the others; everyone here needs something.", "Nothing today, friend. Rest."))
+	case !a.QuestAccepted:
+		c := &Conversation{NPC: a, Line: q.Text + "  I can offer " + q.Reward + "."}
+		c.Choices = []Choice{
+			{"I will do it.", func() {
+				a.QuestAccepted = true
+				if q.Kills > 0 && a.QuestKills < 0 {
+					a.QuestKills = g.Kills
+				}
+				g.converse(a, pick("Thank you. I will be here.", "Good. Come back when it is done."))
+			}},
+			{"Not now.", func() { g.converse(a, pick("Fair enough. The offer stands.", "Think it over.")) }},
+		}
+		g.Conv = c
+	case ready:
+		c := &Conversation{NPC: a, Line: pick("You have it? Hand it over then!", "Is that it? Let me see.")}
+		c.Choices = []Choice{
+			{"Here you go.", func() {
+				if q.Need != Air {
+					g.Player.Inv[q.Need] -= q.NeedN
+				}
+				q.Give(g.Player)
+				g.Player.EnsureHeld()
+				a.QuestDone = true
+				g.Score += 300
+				g.Audio.Play(g.Audio.Clear, 0.8)
+				g.unlock(AchQuest)
+				g.converse(a, pick("Wonderful! Here, as promised: "+q.Reward+".", "You are a marvel. Take this: "+q.Reward+"."))
+			}},
+			{"Not yet.", func() { g.converse(a, "No hurry.") }},
+		}
+		g.Conv = c
+	default:
+		g.converse(a, pick("How goes it? "+progress+".", "Still at it? "+progress+". I will wait."))
+	}
+}
+
+// updateDialog takes a choice by number key or click.
 func (g *Game) updateDialog() {
 	a := g.Talking
-	if a == nil || !a.Alive {
-		g.State = StatePlaying
-		rl.DisableCursor()
+	if a == nil || !a.Alive || g.Conv == nil {
+		g.endTalk()
 		return
 	}
-	if rl.IsKeyPressed(rl.KeyEscape) || rl.IsKeyPressed(rl.KeyE) {
-		g.State = StatePlaying
-		g.Talking = nil
-		rl.DisableCursor()
-		rl.GetMouseDelta()
+	if rl.IsKeyPressed(rl.KeyEscape) {
+		g.endTalk()
 		return
 	}
-	if rl.IsKeyPressed(rl.KeyEnter) || rl.IsMouseButtonPressed(rl.MouseButtonLeft) {
-		done, ready, _ := g.questStatus(a)
-		if !done && ready {
-			q := &quests[a.Quest]
-			if q.Need != Air {
-				g.Player.Inv[q.Need] -= q.NeedN
+	c := g.Conv
+	for i, k := range []int32{rl.KeyOne, rl.KeyTwo, rl.KeyThree, rl.KeyFour} {
+		if i < len(c.Choices) && rl.IsKeyPressed(k) {
+			c.Choices[i].Do()
+			return
+		}
+	}
+	if rl.IsMouseButtonPressed(rl.MouseButtonLeft) {
+		x, y, w := g.dialogRect()
+		m := rl.GetMousePosition()
+		for i := range c.Choices {
+			ry := y + 100 + int32(i)*26
+			if int32(m.X) >= x && int32(m.X) < x+w && int32(m.Y) >= ry && int32(m.Y) < ry+24 {
+				c.Choices[i].Do()
+				return
 			}
-			q.Give(g.Player)
-			g.Player.EnsureHeld()
-			a.QuestDone = true
-			g.Score += 300
-			g.say("Quest complete: "+q.Reward+"  +300", 3)
-			g.Audio.Play(g.Audio.Clear, 0.8)
-			g.unlock(AchQuest)
 		}
 	}
 }
 
+func (g *Game) dialogRect() (x, y, w int32) {
+	sw, sh := int32(rl.GetScreenWidth()), int32(rl.GetScreenHeight())
+	w = 680
+	return sw/2 - w/2, sh - 250, w
+}
+
 func (g *Game) drawDialog() {
 	a := g.Talking
-	if a == nil {
+	c := g.Conv
+	if a == nil || c == nil {
 		return
 	}
-	sw, sh := int32(rl.GetScreenWidth()), int32(rl.GetScreenHeight())
-	w := int32(640)
-	x := sw/2 - w/2
-	y := sh - 230
-	rl.DrawRectangle(x-6, y-6, w+12, 192, rl.NewColor(120, 100, 70, 255))
-	rl.DrawRectangle(x, y, w, 180, rl.NewColor(40, 34, 28, 240))
+	x, y, w := g.dialogRect()
+	h := int32(110 + len(c.Choices)*26)
+	rl.DrawRectangle(x-6, y-6, w+12, h+12, rl.NewColor(120, 100, 70, 255))
+	rl.DrawRectangle(x, y, w, h, rl.NewColor(40, 34, 28, 240))
 	title := fmt.Sprintf("%s the %s", a.Name, professionNames[a.Prof])
 	rl.DrawText(title, x+16, y+12, 24, rl.Gold)
-	q := &quests[a.Quest]
-	done, ready, progress := g.questStatus(a)
-	var line, hint string
-	switch {
-	case done:
-		line = "Thank you again, friend. The village is in your debt."
-		hint = "ESC  leave"
-	case ready:
-		line = q.Text
-		hint = "ENTER  hand it over for " + q.Reward + "        ESC  not now"
-	default:
-		line = q.Text
-		hint = progress + "        reward: " + q.Reward + "        ESC  leave"
+	rl.DrawText("("+g.villagerMood(a)+")", x+20+rl.MeasureText(title, 24), y+18, 16, rl.Gray)
+	drawWrapped(c.Line, x+16, y+44, w-32, 19, rl.White)
+	m := rl.GetMousePosition()
+	for i, ch := range c.Choices {
+		ry := y + 100 + int32(i)*26
+		col := rl.NewColor(200, 220, 255, 255)
+		if int32(m.X) >= x && int32(m.X) < x+w && int32(m.Y) >= ry && int32(m.Y) < ry+24 {
+			col = rl.Gold
+		}
+		rl.DrawText(fmt.Sprintf("%d  %s", i+1, ch.Label), x+24, ry+4, 18, col)
 	}
-	drawWrapped(line, x+16, y+48, w-32, 20, rl.White)
-	rl.DrawText(hint, x+16, y+150, 16, rl.LightGray)
+}
+
+// ambientChatter gives nearby villagers something to say over their heads now and then.
+func (g *Game) ambientChatter(dt float32) {
+	p := g.Player
+	for _, a := range g.Animals {
+		if !a.Alive || a.Kind != AnimalVillager {
+			continue
+		}
+		a.BubbleT = max(0, a.BubbleT-dt)
+		a.BubbleCD -= dt
+		if a.BubbleCD > 0 || WrapDist(a.Pos, p.Pos) > 9 {
+			continue
+		}
+		a.BubbleCD = 14 + rand.Float32()*20
+		var lines []string
+		switch {
+		case g.VillagerGrudge > 0:
+			lines = []string{"Murderer.", "Stay away from my family."}
+		case g.Sky.IsNight():
+			lines = []string{"Lock your door tonight.", "Did you hear that?", "Keep to the torchlight."}
+		case g.Sky.Rain > 0.5:
+			lines = []string{"Good for the crops.", "My roof leaks again."}
+		case a.Prof == ProfFarmer:
+			lines = []string{"Wheat's coming along.", "Seen my sheep?", "Lovely morning."}
+		case a.Prof == ProfGuard:
+			lines = []string{"All quiet.", "Stay sharp.", "I counted eight of them last night."}
+		default:
+			lines = []string{"Have you read about the tower?", "Three diamonds, the book says.", "Fascinating weather."}
+		}
+		if !a.QuestDone && !a.QuestAccepted && rand.Float32() < 0.4 {
+			lines = []string{"I could use a hand.", "Got a moment?"}
+		}
+		a.Bubble = lines[rand.Intn(len(lines))]
+		a.BubbleT = 4
+	}
 }
 
 // drawWrapped draws text broken into lines that fit the width.

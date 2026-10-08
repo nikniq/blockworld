@@ -32,6 +32,7 @@ type SaveData struct {
 	Spawn     rl.Vector3
 	Deaths    int
 	Won       bool
+	Lost      int
 	Hunger    float32
 	SkyT      float32
 	Day       int
@@ -52,6 +53,8 @@ type SavedAnimal struct {
 	QuestDone  bool
 	QuestKills int
 	Tamed      bool
+	Accepted   bool
+	Talks      int
 }
 
 func savePath() string {
@@ -102,12 +105,12 @@ func (g *Game) saveErr() error {
 		Version: saveVersion, NumBlocks: int(numBlocks), Blocks: g.World.Blocks, Seed: g.World.Seed,
 		Pos: pl.Pos, Yaw: pl.Yaw, Pitch: pl.Pitch, HP: pl.HP, Ammo: pl.Ammo, Reserve: pl.Reserve,
 		Inv: pl.Inv[:], SwordTier: pl.SwordTier, PickTier: pl.PickTier, ArmorTier: pl.ArmorTier,
-		Spawn: g.Spawn, Deaths: g.Deaths, Hunger: pl.Hunger, Won: g.Won,
+		Spawn: g.Spawn, Deaths: g.Deaths, Hunger: pl.Hunger, Won: g.Won, Lost: g.VillagersLost,
 		SkyT: g.Sky.T, Day: g.Sky.Day, Night: g.Night, Score: g.Score, Kills: g.Kills,
 	}
 	for _, a := range g.Animals {
 		if a.Alive {
-			d.Animals = append(d.Animals, SavedAnimal{a.Kind, a.Pos, a.HP, a.Home, a.Prof, a.Name, a.Quest, a.QuestDone, a.QuestKills, a.Tamed})
+			d.Animals = append(d.Animals, SavedAnimal{a.Kind, a.Pos, a.HP, a.Home, a.Prof, a.Name, a.Quest, a.QuestDone, a.QuestKills, a.Tamed, a.QuestAccepted, a.TalkCount})
 		}
 	}
 	tmp := p + ".tmp"
@@ -159,7 +162,7 @@ func (g *Game) load() bool {
 	pl.HP, pl.Ammo, pl.Reserve = d.HP, d.Ammo, d.Reserve
 	copy(pl.Inv[:], d.Inv)
 	pl.SwordTier, pl.PickTier, pl.ArmorTier = d.SwordTier, d.PickTier, d.ArmorTier
-	g.Spawn, g.Deaths, g.Won = d.Spawn, d.Deaths, d.Won
+	g.Spawn, g.Deaths, g.Won, g.VillagersLost = d.Spawn, d.Deaths, d.Won, d.Lost
 	pl.Hunger = d.Hunger
 	pl.EnsureHeld()
 	g.Sky.T, g.Sky.Day = d.SkyT, d.Day
@@ -172,6 +175,7 @@ func (g *Game) load() bool {
 		a.Home, a.Prof, a.Name = sa.Home, sa.Prof, sa.Name
 		a.Quest, a.QuestDone, a.QuestKills = sa.Quest%len(quests), sa.QuestDone, sa.QuestKills
 		a.Tamed = sa.Tamed
+		a.QuestAccepted, a.TalkCount = sa.Accepted, sa.Talks
 		if a.Kind == AnimalVillager || a.Kind == AnimalWolf {
 			a.Walking = true
 		}

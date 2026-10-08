@@ -64,9 +64,13 @@ block textures and sound effects are generated at startup.
 - **Villages**: a few per world on flat grassland, each a ring of plank or cobblestone houses with doors,
   windows, beds and torches around a well. One villager lives in each house: farmers, guards and
   librarians, who wander by day, go home at night and run from the undead (guards draw their swords).
-  Zombies hunt villagers as well as you. Right click a villager with a "?" for a quest: bring wheat,
-  stone, leather, coal or gold, or slay hostiles, for rewards such as ammo, armour, diamonds or a
-  diamond sword. Killing a villager costs 200 points.
+  Zombies hunt villagers as well as you. Right click a villager to talk: pick replies with the
+  number keys. They greet you by name, gossip about the village (who is left, how many nights, the
+  trader, the tower), tell you about the land according to their trade, and offer quests you accept
+  first and hand in later: bring wheat, stone, leather, coal or gold, or slay hostiles, for ammo,
+  armour, diamonds or a diamond sword. Their mood shifts with the hour, the weather, their wounds and
+  your deeds. Villagers also chat to each other and to you as you pass. Killing a villager costs 200
+  points and the whole village holds a grudge for a while.
 - **Doors**: four planks make a door. Right click opens and closes it; closed doors stop hostiles and arrows.
 - **Wandering trader**: a robed visitor turns up every couple of days and wanders off again. Right click to
   trade: gold ore for rifle ammo, iron for diamonds, wool for bread, coal for TNT, and more.

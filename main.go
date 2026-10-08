@@ -100,6 +100,9 @@ type Game struct {
 	JoinField      int // 0 address, 1 name
 	Disc           *Discovery
 	Talking        *Animal
+	Conv           *Conversation
+	VillagerGrudge float32 // seconds left of the village being angry at the player
+	VillagersLost  int
 	Won            bool
 	LightningT     float32 // flash remaining
 	ThunderT       float32 // countdown to the thunder clap
@@ -1314,6 +1317,8 @@ func (g *Game) update(dt float32) {
 	g.checkAchievements()
 	g.updateToasts(dt)
 	g.spawnEmbers()
+	g.VillagerGrudge = max(0, g.VillagerGrudge-dt)
+	g.ambientChatter(dt)
 	g.updateStorm(dt)
 	g.RainCD -= dt
 	if g.Sky.Rain > 0.1 && g.RainCD <= 0 && g.World.SkyExposed(p.Eye()) {
@@ -2341,6 +2346,11 @@ func (g *Game) drawHUD() {
 			tw := rl.MeasureText(label, 14)
 			rl.DrawRectangle(int32(sp.X)-tw/2-4, int32(sp.Y)-9, tw+8, 18, rl.NewColor(0, 0, 0, 110))
 			rl.DrawText(label, int32(sp.X)-tw/2, int32(sp.Y)-7, 14, rl.NewColor(255, 240, 200, 255))
+			if a.BubbleT > 0 && a.Bubble != "" {
+				bw := rl.MeasureText(a.Bubble, 16)
+				rl.DrawRectangle(int32(sp.X)-bw/2-8, int32(sp.Y)-36, bw+16, 24, rl.NewColor(255, 255, 255, 230))
+				rl.DrawText(a.Bubble, int32(sp.X)-bw/2, int32(sp.Y)-32, 16, rl.NewColor(30, 30, 30, 255))
+			}
 		}
 	}
 	if g.Net != nil {

@@ -73,12 +73,17 @@ type Animal struct {
 	StepFlag int
 	Visit    float32 // seconds a trader has been around
 	// Villagers.
-	Home       rl.Vector3
-	Prof       Profession
-	Name       string
-	Quest      int
-	QuestDone  bool
-	QuestKills int // kills when a kill quest was accepted (-1: not yet)
+	Home          rl.Vector3
+	Prof          Profession
+	Name          string
+	Quest         int
+	QuestDone     bool
+	QuestKills    int // kills when a kill quest was accepted (-1: not yet)
+	QuestAccepted bool
+	TalkCount     int
+	Bubble        string  // ambient line shown over the head
+	BubbleT       float32 // seconds the bubble stays
+	BubbleCD      float32
 	// Wolves.
 	Tamed  bool
 	AtkCD  float32
@@ -615,7 +620,9 @@ func (g *Game) killAnimal(a *Animal) {
 		}
 	case AnimalVillager:
 		g.Score -= 200
-		g.say("You killed a villager  -200", 2)
+		g.VillagerGrudge = 240 // seconds the village stays angry with you
+		g.VillagersLost++
+		g.say("You killed a villager  -200. The village will remember.", 3)
 	case AnimalDino:
 		g.Score += 800
 		g.spawnDrop(c, Leather, 0)

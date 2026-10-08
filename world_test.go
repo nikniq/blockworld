@@ -800,24 +800,39 @@ func TestVillages(t *testing.T) {
 	if v.HP != hp-5 {
 		t.Fatalf("villager should take damage: %d -> %d", hp, v.HP)
 	}
-	// Quest: give the items and hand them over.
+	// Conversation: greet, accept the quest, hand it in through the menus.
 	v.Quest = 1 // 12 cobblestone for bread and apples
 	g.Player.Inv[Cobble] = 12
 	g.Talking = v
-	done, ready, _ := g.questStatus(v)
-	if done || !ready {
-		t.Fatal("quest should be ready to complete")
+	v.TalkCount++
+	g.converse(v, g.greeting(v))
+	if g.Conv == nil || len(g.Conv.Choices) != 4 || g.Conv.Line == "" {
+		t.Fatalf("conversation should open with four choices: %+v", g.Conv)
 	}
-	q := &quests[v.Quest]
-	g.Player.Inv[q.Need] -= q.NeedN
-	q.Give(g.Player)
-	v.QuestDone = true
-	if g.Player.Inv[Cobble] != 0 || g.Player.Inv[Bread] != 3 {
-		t.Fatal("quest should consume cobblestone and pay bread")
+	g.Conv.Choices[1].Do() // Any work for me?
+	if v.QuestAccepted || len(g.Conv.Choices) != 2 {
+		t.Fatalf("quest should be offered with accept/decline: %+v", g.Conv.Choices)
 	}
-	if done, _, _ := g.questStatus(v); !done {
-		t.Fatal("quest should be marked done")
+	g.Conv.Choices[0].Do() // I will do it.
+	if !v.QuestAccepted {
+		t.Fatal("quest should be accepted")
 	}
+	g.converse(v, "")
+	g.Conv.Choices[1].Do() // I have what you asked for.
+	g.Conv.Choices[0].Do() // Here you go.
+	if !v.QuestDone || g.Player.Inv[Cobble] != 0 || g.Player.Inv[Bread] != 3 {
+		t.Fatal("hand-in should consume cobblestone, pay bread and complete the quest")
+	}
+	if g.villagerMood(v) != "grateful" && g.villagerMood(v) != "nervous" && g.villagerMood(v) != "damp" {
+		t.Fatalf("mood after a completed quest: %s", g.villagerMood(v))
+	}
+	g.VillagerGrudge = 10
+	g.converse(v, g.greeting(v))
+	if len(g.Conv.Choices) != 2 || g.villagerMood(v) != "angry" {
+		t.Fatal("an angry village refuses to deal")
+	}
+	g.Talking = nil
+	g.Conv = nil
 }
 
 // The beacon tower generates far from spawn and lighting it costs diamonds and wins.
