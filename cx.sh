@@ -5,6 +5,9 @@
 #   ./cx.sh --version 1.2   set the version stamped into the package names and metadata
 #   ./cx.sh --skip-tests    package without running the test suite
 #   ./cx.sh --run           launch the packaged game afterwards
+#   ./cx.sh --deps          install the build dependencies first (Linux: dnf, apt or pacman via sudo)
+#   ./cx.sh --install       install the packaged game for the current user (Linux app menu,
+#                           macOS /Applications); combine with --deps for a one-shot setup
 #   ./cx.sh --clean         remove dist/ and build outputs
 #
 # Output (always under dist/):
@@ -19,12 +22,16 @@ cd "$(dirname "$0")"
 VERSION="1.0"
 RUN_TESTS=1
 LAUNCH=0
+DEPS=0
+INSTALL=0
 for arg in "$@"; do
   case "$arg" in
     --version) ;;                       # value handled below
     --version=*) VERSION="${arg#*=}" ;;
     --skip-tests) RUN_TESTS=0 ;;
     --run) LAUNCH=1 ;;
+    --deps) DEPS=1 ;;
+    --install) INSTALL=1 ;;
     --clean) rm -rf dist blockworld blockworld.exe ./*.syso; echo "cleaned"; exit 0 ;;
     -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
   esac
@@ -47,8 +54,37 @@ need() {
   command -v "$1" >/dev/null 2>&1 || fail "$1 is required: $2"
 }
 
+# ---------- optional dependency install ----------
+if [ "$DEPS" = 1 ]; then
+  case "$OS" in
+    Linux)
+      if command -v dnf >/dev/null 2>&1; then
+        say "installing dependencies with dnf"
+        sudo dnf install -y golang gcc mesa-libGL-devel libX11-devel libXi-devel libXcursor-devel \
+          libXrandr-devel libXinerama-devel wayland-devel libxkbcommon-devel
+      elif command -v apt-get >/dev/null 2>&1; then
+        say "installing dependencies with apt"
+        sudo apt-get update
+        sudo apt-get install -y golang-go build-essential libgl1-mesa-dev libx11-dev libxi-dev \
+          libxcursor-dev libxrandr-dev libxinerama-dev libwayland-dev libxkbcommon-dev
+      elif command -v pacman >/dev/null 2>&1; then
+        say "installing dependencies with pacman"
+        sudo pacman -S --needed --noconfirm go gcc mesa libx11 libxi libxcursor libxrandr libxinerama wayland libxkbcommon
+      else
+        fail "no supported package manager found (dnf, apt or pacman); install Go, gcc and the OpenGL/X11 headers by hand"
+      fi
+      ;;
+    Darwin)
+      say "installing the command line tools (clang)"
+      xcode-select --install 2>/dev/null || true
+      command -v go >/dev/null 2>&1 || { command -v brew >/dev/null 2>&1 && brew install go; } || true
+      ;;
+    *) say "--deps is not automated on $OS; see the README" ;;
+  esac
+fi
+
 # ---------- toolchain checks ----------
-need go "install Go 1.22 or newer from https://go.dev/dl/"
+need go "install Go 1.22 or newer from https://go.dev/dl/ (or run ./cx.sh --deps)"
 case "$OS" in
   Darwin)
     need clang "run: xcode-select --install"
@@ -199,6 +235,27 @@ say "checksums"
 
 say "done"
 ls -la dist | grep -v "^total\|^d.* \.\.\?$" | sed 's/^/    /'
+
+# ---------- optional install ----------
+if [ "$INSTALL" = 1 ]; then
+  case "$OS" in
+    Linux)
+      say "installing for the current user"
+      "$STAGE/install.sh"
+      OUT="$HOME/.local/bin/blockworld"
+      ;;
+    Darwin)
+      say "installing to /Applications (falls back to ~/Applications)"
+      if cp -R "$APP" /Applications/ 2>/dev/null; then
+        OUT="/Applications/Blockworld.app"
+      else
+        mkdir -p ~/Applications && cp -R "$APP" ~/Applications/ && OUT="$HOME/Applications/Blockworld.app"
+      fi
+      echo "Installed $OUT"
+      ;;
+    *) say "--install is not automated on $OS; the package is in dist/" ;;
+  esac
+fi
 
 if [ "$LAUNCH" = 1 ]; then
   say "launching"

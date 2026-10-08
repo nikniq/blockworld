@@ -199,6 +199,7 @@ tests, builds, packages for the platform it runs on and writes checksums into `d
 ./cx.sh                  # dist/Blockworld.app + zip on macOS, tar.gz with installer on Linux, zip on Windows
 ./cx.sh --version 1.2    # stamp a version into the package names and the menu
 ./cx.sh --run            # launch the packaged game afterwards
+./cx.sh --deps --install # Linux one-shot: install the distro packages, build, package and add to the app menu
 ```
 
 On Windows run it from a Git Bash or MSYS2 shell. The pieces it uses are also available as make targets:
