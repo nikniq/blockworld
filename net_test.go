@@ -73,7 +73,16 @@ func TestMultipleTargets(t *testing.T) {
 	g.Reset()
 	g.Player.Pos = rl.NewVector3(0.5, 14, 0.5)
 	g.Remotes[7] = &RemotePlayer{PlayerState{ID: 7, Name: "Bob", Pos: rl.NewVector3(20.5, 14, 0.5), HP: 50}}
-	if n := len(g.targets()); n != 2 {
+	players := func() int {
+		n := 0
+		for _, tt := range g.targets() {
+			if tt.ID&villagerIDBit == 0 {
+				n++
+			}
+		}
+		return n
+	}
+	if n := players(); n != 2 {
 		t.Fatalf("targets %d", n)
 	}
 	if g.nearestTarget(rl.NewVector3(18, 14, 0)).ID != 7 {
@@ -89,7 +98,7 @@ func TestMultipleTargets(t *testing.T) {
 		t.Fatal("remote player's cell should be a seed")
 	}
 	g.Remotes[7].HP = 0
-	if n := len(g.targets()); n != 1 {
+	if n := players(); n != 1 {
 		t.Fatalf("dead players are not targets: %d", n)
 	}
 }

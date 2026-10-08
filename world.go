@@ -784,11 +784,16 @@ func (w *World) generate(seed int) {
 		w.setLocal(x+3, y, z, Air)
 		w.setLocal(x+3, y+1, z, Air)
 	}
+	// Villages on flat grassland.
+	w.placeVillages(heights)
 	// Abandoned mineshafts: long timbered corridors with a few crates.
 	for i := 0; i < 4*areaScale; i++ {
 		x, z := rand.Intn(worldW-40)+20, rand.Intn(worldD-40)+20
 		y := 8 + rand.Intn(10)
-		if heights[z*worldW+x] < y+10 {
+		if heights[z*worldW+x]-12 < y {
+			y = heights[z*worldW+x] - 12 // stay well under the surface
+		}
+		if y < 4 {
 			continue
 		}
 		dx, dz := 1, 0
@@ -959,6 +964,9 @@ func (w *World) GrowTree(x, y, z int) bool {
 	w.placeTree(lx, y, lz, func(x, y, z int, b Block) { w.Set(x+originX, y, z+originZ, b) })
 	return true
 }
+
+func mathCos(a float64) float64 { return math.Cos(a) }
+func mathSin(a float64) float64 { return math.Sin(a) }
 
 func abs(a int) int {
 	if a < 0 {

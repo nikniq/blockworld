@@ -27,6 +27,9 @@ const (
 	SkinSheep
 	SkinDino
 	SkinTrader
+	SkinFarmer
+	SkinGuard
+	SkinLibrarian
 	numSkins
 )
 
@@ -125,9 +128,26 @@ func paintSkin(kind SkinKind, part, face, x, y int) rl.Color {
 		return rl.NewColor(0, 0, 0, 0)
 	}
 	switch kind {
-	case SkinPlayer, SkinZombie, SkinBrute, SkinTrader:
+	case SkinPlayer, SkinZombie, SkinBrute, SkinTrader, SkinFarmer, SkinGuard, SkinLibrarian:
 		skin, shirt, pants := skinTone, col(60, 170, 170), col(50, 60, 150)
 		hair := col(70, 45, 30)
+		switch kind {
+		case SkinFarmer:
+			shirt, pants, hair = col(140, 100, 60), col(90, 70, 50), col(220, 190, 90) // straw hat
+			if part == PartHead && face != 1 && y < 5 {
+				return shade(col(225, 195, 95))
+			}
+		case SkinGuard:
+			shirt, pants, hair = col(120, 125, 135), col(70, 72, 80), col(90, 95, 105) // steel helm
+			if part == PartBody && (x+y)%4 == 0 {
+				return shade(col(150, 155, 165)) // chainmail glint
+			}
+		case SkinLibrarian:
+			shirt, pants, hair = col(225, 222, 210), col(120, 110, 100), col(200, 200, 200)
+			if part == PartHead && face == 4 && y >= 8 && y <= 9 && (x == 3 || x == 6 || x == 9 || x == 12) {
+				return col(40, 40, 40) // spectacle rims
+			}
+		}
 		if kind == SkinTrader {
 			shirt, pants, hair = col(90, 60, 130), col(60, 40, 90), col(40, 30, 30)
 			if part == PartBody && face == 4 && y > 4 && x >= 5 && x <= 10 && (x+y)%3 == 0 {

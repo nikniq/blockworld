@@ -7,6 +7,7 @@ package main
 import (
 	_ "embed"
 	"flag"
+	"runtime/pprof"
 	"fmt"
 	"image"
 	"image/color"
@@ -38,6 +39,7 @@ const (
 	StateGameOver
 	StateJoin
 	StateTrade
+	StateDialog
 )
 
 var playerName string
@@ -97,6 +99,7 @@ type Game struct {
 	JoinErr        string
 	JoinField      int // 0 address, 1 name
 	Disc           *Discovery
+	Talking        *Animal
 	LightningT     float32 // flash remaining
 	ThunderT       float32 // countdown to the thunder clap
 	StormCD        float32
@@ -180,6 +183,7 @@ func (g *Game) Reset() {
 	g.AnimalCD = 25
 	g.spawnAnimals(16)
 	g.spawnDinosaur()
+	g.spawnVillagers()
 	g.say("Day 1  -  mine, craft and build before dark  (E = crafting)", 5)
 }
 
@@ -1309,13 +1313,24 @@ func (g *Game) update(dt float32) {
 	if usePressed() && g.State == StatePlaying {
 		ray := rl.NewRay(p.Eye(), p.Forward())
 		for _, an := range g.Animals {
-			if an.Alive && an.Kind == AnimalTrader {
-				if c := rl.GetRayCollisionBox(ray, an.BB()); c.Hit && c.Distance < 4 {
+			if !an.Alive || (an.Kind != AnimalTrader && an.Kind != AnimalVillager) {
+				continue
+			}
+			bb := an.BB()
+			n := Near(an.Pos, p.Pos)
+			d := rl.Vector3Subtract(n, an.Pos)
+			bb = rl.NewBoundingBox(rl.Vector3Add(bb.Min, d), rl.Vector3Add(bb.Max, d))
+			if c := rl.GetRayCollisionBox(ray, bb); c.Hit && c.Distance < 4 {
+				if an.Kind == AnimalTrader {
 					g.State = StateTrade
 					g.CraftHover = -1
 					rl.EnableCursor()
-					return
+				} else if g.isClient() {
+					g.say(an.Name+" the "+professionNames[an.Prof]+" nods at you (quests are handled by the host)", 2.5)
+				} else {
+					g.talkTo(an)
 				}
+				return
 			}
 		}
 	}
@@ -2179,6 +2194,31 @@ func (g *Game) drawHUD() {
 			rl.DrawText(r.Name, int32(sp.X)-tw/2, int32(sp.Y)-8, 16, rl.White)
 		}
 	}
+	{
+		cam := g.camera()
+		fwd := rl.Vector3Normalize(rl.Vector3Subtract(cam.Target, cam.Position))
+		for _, a := range g.Animals {
+			if !a.Alive || a.Kind != AnimalVillager {
+				continue
+			}
+			np := Near(a.Pos, cam.Position)
+			if WrapDist(np, cam.Position) > 14 {
+				continue
+			}
+			head := rl.Vector3Add(np, rl.NewVector3(0, 2.1, 0))
+			if rl.Vector3DotProduct(rl.Vector3Subtract(head, cam.Position), fwd) <= 0.5 {
+				continue
+			}
+			sp := rl.GetWorldToScreen(head, cam)
+			label := a.Name + " the " + professionNames[a.Prof]
+			if !a.QuestDone {
+				label += "  ?"
+			}
+			tw := rl.MeasureText(label, 14)
+			rl.DrawRectangle(int32(sp.X)-tw/2-4, int32(sp.Y)-9, tw+8, 18, rl.NewColor(0, 0, 0, 110))
+			rl.DrawText(label, int32(sp.X)-tw/2, int32(sp.Y)-7, 14, rl.NewColor(255, 240, 200, 255))
+		}
+	}
 	if g.Net != nil {
 		status := fmt.Sprintf("You are %s   %s   %d players", g.Net.Name, g.Net.Status, g.Net.PlayerCount())
 		if g.isClient() {
@@ -2267,6 +2307,7 @@ func (g *Game) drawHelp(sw, sh int32) {
 		"Hunger drains as you move; eat meat and apples (right click). Cook meat with coal (E). Full stomach heals.",
 		"Online: T chat   P player list      Creative mode (G in pause): fly with double-tap SPACE, build freely",
 		"K achievements   N (pause) music on/off      Doors: 4 planks, right click to open. Trader: right click to trade",
+		"Villages: right click a villager (?) for a quest. Guards fight the undead; keep the others safe.",
 		"H closes this help",
 	}
 	w := int32(760)
@@ -2870,6 +2911,14 @@ func (g *Game) scriptedShots(frame int) bool {
 		g.Player.Pitch = -0.15
 		g.ThirdPerson = true
 		g.ShowHelp = false
+		for _, a := range g.Animals {
+			if a.Alive && a.Kind == AnimalVillager {
+				g.Player.Pos = rl.Vector3Add(a.Home, rl.NewVector3(0, 0, 3))
+				g.Player.Pos.Y = float32(g.World.SurfaceY(floorI(g.Player.Pos.X), floorI(g.Player.Pos.Z)))
+				g.Player.Yaw = math.Pi // face -Z toward the house
+				break
+			}
+		}
 		g.Player.Hunger = 13
 		g.ShowHelp = false
 		g.Sky.Raining, g.Sky.Rain = false, 0
@@ -3002,6 +3051,13 @@ func main() {
 		rl.ToggleBorderlessWindowed()
 	}
 
+	if pf := os.Getenv("BLOCKWORLD_PROF"); pf != "" {
+		// Developer aid: BLOCKWORLD_PROF=cpu.out writes a CPU profile of the session.
+		if f, err := os.Create(pf); err == nil {
+			_ = pprof.StartCPUProfile(f)
+			defer func() { pprof.StopCPUProfile(); f.Close() }()
+		}
+	}
 	g := NewGame()
 	defer g.Audio.Close()
 	g.Net = &Net{Name: *name}
@@ -3111,6 +3167,11 @@ func main() {
 					g.JoinText = settings.LastJoin
 				}
 			}
+		case StateDialog:
+			g.updateDialog()
+			if g.isHost() {
+				g.update(0)
+			}
 		case StateTrade:
 			if rl.IsKeyPressed(rl.KeyEscape) || rl.IsKeyPressed(rl.KeyE) {
 				g.State = StatePlaying
@@ -3217,6 +3278,9 @@ func main() {
 		case StateTrade:
 			g.drawHUD()
 			g.drawTrade()
+		case StateDialog:
+			g.drawHUD()
+			g.drawDialog()
 		default:
 			g.drawHUD()
 			g.drawOverlay()

@@ -50,6 +50,12 @@ block textures and sound effects are generated at startup.
 - **A dinosaur** roams every world: a striped, two-legged beast three blocks tall that thuds as it walks
   and roars across the valley. Leave it alone and it ignores you. Hurt it and it charges and bites for
   serious damage until it loses interest. Slaying it is worth 800 points, eight meat and leather.
+- **Villages**: a few per world on flat grassland, each a ring of plank or cobblestone houses with doors,
+  windows, beds and torches around a well. One villager lives in each house: farmers, guards and
+  librarians, who wander by day, go home at night and run from the undead (guards draw their swords).
+  Zombies hunt villagers as well as you. Right click a villager with a "?" for a quest: bring wheat,
+  stone, leather, coal or gold, or slay hostiles, for rewards such as ammo, armour, diamonds or a
+  diamond sword. Killing a villager costs 200 points.
 - **Doors**: four planks make a door. Right click opens and closes it; closed doors stop hostiles and arrows.
 - **Wandering trader**: a robed visitor turns up every couple of days and wanders off again. Right click to
   trade: gold ore for rifle ammo, iron for diamonds, wool for bread, coal for TNT, and more.

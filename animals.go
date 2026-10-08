@@ -17,6 +17,7 @@ const (
 	AnimalSheep
 	AnimalDino
 	AnimalTrader
+	AnimalVillager
 	numAnimalKinds
 )
 
@@ -34,11 +35,12 @@ type animalSpec struct {
 }
 
 var animalKinds = [...]animalSpec{
-	AnimalPig:    {"Pig", 4, 1.6, 0.35, 0.9, rl.NewColor(235, 160, 170, 255), rl.NewColor(240, 170, 180, 255), rl.NewColor(220, 140, 150, 255), 2, 0},
-	AnimalCow:    {"Cow", 6, 1.4, 0.4, 1.3, rl.NewColor(80, 55, 40, 255), rl.NewColor(90, 65, 50, 255), rl.NewColor(60, 40, 30, 255), 3, 0},
-	AnimalSheep:  {"Sheep", 4, 1.5, 0.4, 1.1, rl.NewColor(230, 230, 225, 255), rl.NewColor(70, 60, 55, 255), rl.NewColor(60, 55, 50, 255), 1, 0},
-	AnimalDino:   {"Dinosaur", 45, 2.2, 0.7, 2.8, rl.NewColor(70, 120, 60, 255), rl.NewColor(80, 130, 65, 255), rl.NewColor(60, 100, 50, 255), 8, 18},
-	AnimalTrader: {"Wandering Trader", 20, 1.2, 0.3, 1.8, rl.NewColor(90, 60, 130, 255), rl.NewColor(205, 160, 120, 255), rl.NewColor(60, 40, 90, 255), 0, 0},
+	AnimalPig:      {"Pig", 4, 1.6, 0.35, 0.9, rl.NewColor(235, 160, 170, 255), rl.NewColor(240, 170, 180, 255), rl.NewColor(220, 140, 150, 255), 2, 0},
+	AnimalCow:      {"Cow", 6, 1.4, 0.4, 1.3, rl.NewColor(80, 55, 40, 255), rl.NewColor(90, 65, 50, 255), rl.NewColor(60, 40, 30, 255), 3, 0},
+	AnimalSheep:    {"Sheep", 4, 1.5, 0.4, 1.1, rl.NewColor(230, 230, 225, 255), rl.NewColor(70, 60, 55, 255), rl.NewColor(60, 55, 50, 255), 1, 0},
+	AnimalDino:     {"Dinosaur", 45, 2.2, 0.7, 2.8, rl.NewColor(70, 120, 60, 255), rl.NewColor(80, 130, 65, 255), rl.NewColor(60, 100, 50, 255), 8, 18},
+	AnimalTrader:   {"Wandering Trader", 20, 1.2, 0.3, 1.8, rl.NewColor(90, 60, 130, 255), rl.NewColor(205, 160, 120, 255), rl.NewColor(60, 40, 90, 255), 0, 0},
+	AnimalVillager: {"Villager", 20, 1.3, 0.3, 1.8, rl.NewColor(150, 110, 70, 255), rl.NewColor(205, 160, 120, 255), rl.NewColor(80, 60, 40, 255), 0, 0},
 }
 
 type Animal struct {
@@ -56,16 +58,23 @@ type Animal struct {
 	RoarCD   float32
 	StepFlag int
 	Visit    float32 // seconds a trader has been around
-	Phase    float32
-	Alive    bool
-	DeathT   float32
-	Lum      float32
+	// Villagers.
+	Home       rl.Vector3
+	Prof       Profession
+	Name       string
+	Quest      int
+	QuestDone  bool
+	QuestKills int // kills when a kill quest was accepted (-1: not yet)
+	Phase      float32
+	Alive      bool
+	DeathT     float32
+	Lum        float32
 }
 
 func NewAnimal(pos rl.Vector3, kind AnimalKind) *Animal {
 	s := &animalKinds[kind]
 	a := rand.Float64() * 2 * math.Pi
-	return &Animal{Kind: kind, Spec: s, Pos: pos, HP: s.HP, Alive: true, Lum: 1,
+	return &Animal{Kind: kind, Spec: s, Pos: pos, HP: s.HP, Alive: true, Lum: 1, QuestKills: -1,
 		Heading: rl.NewVector3(float32(math.Sin(a)), 0, float32(math.Cos(a)))}
 }
 
@@ -175,6 +184,39 @@ func (a *Animal) Draw(w *World) {
 		kind, scale = SkinCow, 0.93
 	case AnimalSheep:
 		kind, scale = SkinSheep, 0.95
+	case AnimalVillager:
+		pose := Pose{Pos: a.Pos, Yaw: yawOf(a.Heading), Phase: a.Phase, Amp: 0, Scale: 0.9, Lum: a.Lum, Alpha: 1}
+		if a.Walking || a.Flee > 0 {
+			pose.Amp = 1
+		}
+		if !a.Alive {
+			pose.Death = clamp(a.DeathT*2.5, 0, 1)
+			pose.Alpha = 1 - pose.Death
+			if pose.Death >= 1 {
+				return
+			}
+		}
+		if a.Flee > 3.7 {
+			pose.Flash = (a.Flee - 3.7) / 0.3
+		}
+		skin := SkinFarmer
+		switch a.Prof {
+		case ProfGuard:
+			skin = SkinGuard
+			pose.Held = Item{Kind: ItemSword}
+			pose.SwordTier = TierIron
+			pose.Swing = clamp(a.BiteCD-0.8, 0, 0.4) / 0.4
+		case ProfLibrarian:
+			skin = SkinLibrarian
+		}
+		skins.DrawHumanoid(w, skin, &pose)
+		if a.Alive && a.HP < a.Spec.HP {
+			top := a.Pos.Y + a.Spec.Height + 0.2
+			frac := float32(a.HP) / float32(a.Spec.HP)
+			rl.DrawCubeV(rl.NewVector3(a.Pos.X, top, a.Pos.Z), rl.NewVector3(1.0, 0.08, 0.08), rl.NewColor(0, 0, 0, 180))
+			rl.DrawCubeV(rl.NewVector3(a.Pos.X-(1-frac)*0.5, top, a.Pos.Z), rl.NewVector3(frac, 0.1, 0.1), rl.Lime)
+		}
+		return
 	case AnimalTrader:
 		pose := Pose{Pos: a.Pos, Yaw: yawOf(a.Heading), Phase: a.Phase, Amp: 0, Scale: 0.9, Lum: a.Lum, Alpha: 1}
 		if a.Walking || a.Flee > 0 {
@@ -296,6 +338,9 @@ func (g *Game) updateAnimals(dt float32) {
 	alive := 0
 	keep := g.Animals[:0]
 	for _, a := range g.Animals {
+		if a.Alive && a.Kind == AnimalVillager {
+			g.villagerTick(a, dt)
+		}
 		t := g.nearestTarget(a.Pos)
 		if bite := a.Update(dt, g.World, t); bite > 0 {
 			g.hurtTargetFrom(t.ID, int(float32(bite)*damageScale()+0.5), "was eaten by a Dinosaur", true, a.Pos, 7)
@@ -326,11 +371,17 @@ func (g *Game) updateAnimals(dt float32) {
 		}
 	}
 	g.Animals = keep
-	// Herds slowly recover during the day.
+	// Herds slowly recover during the day (villagers do not count as herd animals).
 	g.AnimalCD -= dt
 	if g.AnimalCD <= 0 {
 		g.AnimalCD = 25
-		if alive < 10 && !g.Sky.IsNight() {
+		herd := 0
+		for _, a := range g.Animals {
+			if a.Alive && a.Kind < AnimalDino {
+				herd++
+			}
+		}
+		if herd < 10 && !g.Sky.IsNight() {
 			g.spawnAnimals(2)
 		}
 		if g.dinosaurs() == 0 && rand.Float32() < 0.35 {
@@ -361,6 +412,9 @@ func (g *Game) killAnimal(a *Animal) {
 		g.spawnDrop(c, Meat, 0)
 	}
 	switch a.Kind {
+	case AnimalVillager:
+		g.Score -= 200
+		g.say("You killed a villager  -200", 2)
 	case AnimalDino:
 		g.Score += 800
 		g.spawnDrop(c, Leather, 0)

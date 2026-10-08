@@ -10,7 +10,7 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-const saveVersion = 4
+const saveVersion = 5
 
 // SaveData is the persisted state of a run: the whole voxel volume, the
 // player, the clock and the animals. Hostiles and drops are not kept.
@@ -41,9 +41,15 @@ type SaveData struct {
 }
 
 type SavedAnimal struct {
-	Kind AnimalKind
-	Pos  rl.Vector3
-	HP   int
+	Kind       AnimalKind
+	Pos        rl.Vector3
+	HP         int
+	Home       rl.Vector3
+	Prof       Profession
+	Name       string
+	Quest      int
+	QuestDone  bool
+	QuestKills int
 }
 
 func savePath() string {
@@ -99,7 +105,7 @@ func (g *Game) saveErr() error {
 	}
 	for _, a := range g.Animals {
 		if a.Alive {
-			d.Animals = append(d.Animals, SavedAnimal{a.Kind, a.Pos, a.HP})
+			d.Animals = append(d.Animals, SavedAnimal{a.Kind, a.Pos, a.HP, a.Home, a.Prof, a.Name, a.Quest, a.QuestDone, a.QuestKills})
 		}
 	}
 	tmp := p + ".tmp"
@@ -161,6 +167,11 @@ func (g *Game) load() bool {
 	for _, sa := range d.Animals {
 		a := NewAnimal(sa.Pos, sa.Kind)
 		a.HP = sa.HP
+		a.Home, a.Prof, a.Name = sa.Home, sa.Prof, sa.Name
+		a.Quest, a.QuestDone, a.QuestKills = sa.Quest%len(quests), sa.QuestDone, sa.QuestKills
+		if a.Kind == AnimalVillager {
+			a.Walking = true
+		}
 		g.Animals = append(g.Animals, a)
 	}
 	g.say("World loaded", 2)

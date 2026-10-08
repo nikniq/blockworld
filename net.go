@@ -70,6 +70,9 @@ type AnimalState struct {
 	Alive   bool
 	DeathT  float32
 	Phase   float32
+	Prof    Profession
+	Name    string
+	Walking bool
 }
 
 type DropState struct {
@@ -418,7 +421,7 @@ func (g *Game) makeSnapshot() *Snapshot {
 		s.Enemies = append(s.Enemies, EnemyState{e.ID, e.Kind, e.Pos, e.Heading, e.HP, e.MaxHP, e.Alive, e.DeathT, e.Fuse, e.Burning, e.HitFlash})
 	}
 	for _, a := range g.Animals {
-		s.Animals = append(s.Animals, AnimalState{a.ID, a.Kind, a.Pos, a.Heading, a.HP, a.Alive, a.DeathT, a.Phase})
+		s.Animals = append(s.Animals, AnimalState{a.ID, a.Kind, a.Pos, a.Heading, a.HP, a.Alive, a.DeathT, a.Phase, a.Prof, a.Name, a.Walking})
 	}
 	for i := range g.Drops {
 		d := &g.Drops[i]
@@ -785,6 +788,7 @@ func (g *Game) applySnapshot(s *Snapshot) {
 		}
 		a.Pos = WrapPos(a.Pos)
 		a.Heading, a.HP, a.Alive, a.DeathT, a.Phase = as.Heading, as.HP, as.Alive, as.DeathT, as.Phase
+		a.Prof, a.Name, a.Walking = as.Prof, as.Name, as.Walking
 		g.Animals = append(g.Animals, a)
 	}
 	g.Drops = g.Drops[:0]
@@ -824,6 +828,7 @@ func (g *Game) targets() []Target {
 			ts = append(ts, r.Target())
 		}
 	}
+	ts = append(ts, g.villagerTargets()...)
 	if len(ts) == 0 {
 		ts = append(ts, g.localTarget())
 	}
@@ -851,6 +856,10 @@ func (g *Game) hurtTarget(id uint32, amount int, cause string, armored bool) {
 
 // hurtTargetFrom is hurtTarget with knockback away from a point.
 func (g *Game) hurtTargetFrom(id uint32, amount int, cause string, armored bool, from rl.Vector3, knock float32) {
+	if id&villagerIDBit != 0 {
+		g.hurtVillager(id, amount, from)
+		return
+	}
 	if id == 0 {
 		if g.Headless {
 			return

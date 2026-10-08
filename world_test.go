@@ -557,9 +557,10 @@ func TestCreativeMode(t *testing.T) {
 	}
 	g := &Game{Audio: &Audio{}, CraftHover: -1}
 	g.Reset()
-	if len(g.targets()) != 1 || g.targets()[0].ID != 0 {
-		// A creative player is still a fallback target when nobody else exists.
-		t.Fatalf("targets %v", g.targets())
+	for _, tt := range g.targets() {
+		if tt.ID == 0 && len(g.targets()) > 1 {
+			t.Fatal("a creative player should not be a target while villagers exist")
+		}
 	}
 }
 
@@ -749,5 +750,72 @@ func TestWorldWraps(t *testing.T) {
 	x, z := nav.cellOf(a)
 	if nav.Dist[z*nav.N+x] < 0 || nav.Dist[z*nav.N+x] > 3 {
 		t.Fatalf("east edge should be a step from the west edge: dist %d", nav.Dist[z*nav.N+x])
+	}
+}
+
+// Villages generate with beds, villagers spawn at them, quests complete, and zombies target villagers.
+func TestVillages(t *testing.T) {
+	rand.Seed(17)
+	g := &Game{Audio: &Audio{}, CraftHover: -1}
+	g.Reset()
+	villagers := 0
+	var v *Animal
+	for _, a := range g.Animals {
+		if a.Kind == AnimalVillager {
+			villagers++
+			if v == nil {
+				v = a
+			}
+		}
+	}
+	if villagers < 4 {
+		t.Fatalf("expected villagers in generated villages, got %d", villagers)
+	}
+	doors, beds := 0, 0
+	for _, b := range g.World.Blocks {
+		switch b {
+		case DoorClosed, DoorOpen:
+			doors++
+		case Bed:
+			beds++
+		}
+	}
+	if doors < 4 || beds < villagers {
+		t.Fatalf("houses need doors and beds: %d doors, %d beds", doors, beds)
+	}
+	// A zombie next to a villager chases it; damage routes to the villager.
+	g.Player.Pos = rl.NewVector3(v.Pos.X+60, 14, v.Pos.Z)
+	ts := g.targets()
+	found := false
+	for _, tt := range ts {
+		if tt.ID&villagerIDBit != 0 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("villagers should be hostile targets")
+	}
+	hp := v.HP
+	g.hurtTargetFrom(villagerIDBit|v.ID, 5, "zombie", true, v.Pos, 0)
+	if v.HP != hp-5 {
+		t.Fatalf("villager should take damage: %d -> %d", hp, v.HP)
+	}
+	// Quest: give the items and hand them over.
+	v.Quest = 1 // 12 cobblestone for bread and apples
+	g.Player.Inv[Cobble] = 12
+	g.Talking = v
+	done, ready, _ := g.questStatus(v)
+	if done || !ready {
+		t.Fatal("quest should be ready to complete")
+	}
+	q := &quests[v.Quest]
+	g.Player.Inv[q.Need] -= q.NeedN
+	q.Give(g.Player)
+	v.QuestDone = true
+	if g.Player.Inv[Cobble] != 0 || g.Player.Inv[Bread] != 3 {
+		t.Fatal("quest should consume cobblestone and pay bread")
+	}
+	if done, _, _ := g.questStatus(v); !done {
+		t.Fatal("quest should be marked done")
 	}
 }
