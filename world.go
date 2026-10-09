@@ -357,10 +357,16 @@ type meshBuf struct {
 
 // chunk owns two meshes. Each meshBuf is its own heap object: cgo's pointer
 // check scans the whole object around a mesh, so nothing else may live beside it.
+// chunk owns one opaque and one translucent mesh per vertical section, so
+// the deep underground can be skipped when it cannot be seen.
+const chunkSections = 3
+const sectionH = worldH / chunkSections
+
 type chunk struct {
-	opaque *meshBuf
-	trans  *meshBuf
+	opaque [chunkSections]*meshBuf
+	trans  [chunkSections]*meshBuf
 	dirty  bool
+	ci, cj int
 }
 
 // Env is the per-frame lighting and fog state pushed to the world shader.
@@ -465,7 +471,11 @@ func newEmptyWorld() *World {
 		blockM:  map[Block]*meshBuf{},
 	}
 	for i := 0; i < w.ncx*w.ncz; i++ {
-		w.chunks = append(w.chunks, &chunk{opaque: &meshBuf{}, trans: &meshBuf{}, dirty: true})
+		c := &chunk{dirty: true, ci: i % w.ncx, cj: i / w.ncx}
+		for k := 0; k < chunkSections; k++ {
+			c.opaque[k], c.trans[k] = &meshBuf{}, &meshBuf{}
+		}
+		w.chunks = append(w.chunks, c)
 	}
 	return w
 }
@@ -626,15 +636,31 @@ func (w *World) flushLight() {
 	if len(w.relight) == 0 {
 		return
 	}
-	cx0, cz0, cx1, cz1 := w.ncx, w.ncz, -1, -1
+	// Relight each dirty chunk with a one-chunk margin (light reaches 15
+	// blocks), merging only chunks that are close together. Scattered edits
+	// (tree growth across the map) must not collapse into one world-sized box.
+	done := map[int]bool{}
 	for ci := range w.relight {
+		if done[ci] {
+			continue
+		}
 		i, j := ci%w.ncx, ci/w.ncx
-		cx0, cz0 = min(cx0, i), min(cz0, j)
-		cx1, cz1 = max(cx1, i), max(cz1, j)
+		cx0, cz0, cx1, cz1 := i, j, i, j
+		for cj := range w.relight {
+			if done[cj] {
+				continue
+			}
+			ii, jj := cj%w.ncx, cj/w.ncx
+			if abs(ii-i) <= 2 && abs(jj-j) <= 2 {
+				cx0, cz0 = min(cx0, ii), min(cz0, jj)
+				cx1, cz1 = max(cx1, ii), max(cz1, jj)
+				done[cj] = true
+			}
+		}
+		done[ci] = true
+		w.relightRegion((cx0-1)*chunkSize, (cz0-1)*chunkSize, (cx1+2)*chunkSize, (cz1+2)*chunkSize)
 	}
 	w.relight = map[int]bool{}
-	// Light travels at most 15 blocks, so one chunk of margin is enough.
-	w.relightRegion((cx0-1)*chunkSize, (cz0-1)*chunkSize, (cx1+2)*chunkSize, (cz1+2)*chunkSize)
 }
 
 // ---------- generation ----------
@@ -1623,8 +1649,10 @@ func (m *meshBuf) upload() {
 }
 
 func (w *World) buildChunk(ci, cj int, c *chunk) {
-	c.opaque.reset()
-	c.trans.reset()
+	for k := 0; k < chunkSections; k++ {
+		c.opaque[k].reset()
+		c.trans[k].reset()
+	}
 	occ := func(x, y, z int) int {
 		if w.getLocal(x, y, z).Opaque() {
 			return 1
@@ -1650,13 +1678,13 @@ func (w *World) buildChunk(ci, cj int, c *chunk) {
 						box = w.ladderBox(lx, y, lz)
 					}
 					if info.Cross {
-						c.opaque.emitCross(b, wx, float32(y), wz, box[1][1], l, biomeTintCode(b, &faces[0], w.Biome[lz*worldW+lx]))
+						c.opaque[y/sectionH].emitCross(b, wx, float32(y), wz, box[1][1], l, biomeTintCode(b, &faces[0], w.Biome[lz*worldW+lx]))
 						continue
 					}
 					for fi := range faces {
-						c.opaque.emitFace(&faces[fi], b, wx, float32(y), wz, box, 1, [4]int{3, 3, 3, 3}, [4]cornerLight{l, l, l, l})
+						c.opaque[y/sectionH].emitFace(&faces[fi], b, wx, float32(y), wz, box, 1, [4]int{3, 3, 3, 3}, [4]cornerLight{l, l, l, l})
 						if code := biomeTintCode(b, &faces[fi], w.Biome[lz*worldW+lx]); code != 255 {
-							c.opaque.setLastFaceAlpha(code)
+							c.opaque[y/sectionH].setLastFaceAlpha(code)
 						}
 					}
 					continue
@@ -1707,9 +1735,9 @@ func (w *World) buildChunk(ci, cj int, c *chunk) {
 						}
 						light[k] = cornerLight{sun / n / 15, blk / n / 15}
 					}
-					dst := c.opaque
+					dst := c.opaque[y/sectionH]
 					if trans {
-						dst = c.trans
+						dst = c.trans[y/sectionH]
 					}
 					dst.emitFace(f, b, wx, float32(y), wz, box, tint, ao, light)
 					if code := biomeTintCode(b, f, w.Biome[lz*worldW+lx]); code != 255 {
@@ -1719,8 +1747,10 @@ func (w *World) buildChunk(ci, cj int, c *chunk) {
 			}
 		}
 	}
-	c.opaque.upload()
-	c.trans.upload()
+	for k := 0; k < chunkSections; k++ {
+		c.opaque[k].upload()
+		c.trans[k].upload()
+	}
 }
 
 // BlockMesh returns a cached unit cube mesh (centred on the origin) for a block type.
@@ -1887,8 +1917,10 @@ func (w *World) initGPU() {
 // Unload frees the GPU resources of a world that is being replaced.
 func (w *World) Unload() {
 	for _, c := range w.chunks {
-		c.opaque.free()
-		c.trans.free()
+		for k := 0; k < chunkSections; k++ {
+			c.opaque[k].free()
+			c.trans[k].free()
+		}
 	}
 	for _, m := range w.blockM {
 		m.free()
@@ -2009,12 +2041,28 @@ func (w *World) visibleChunks(cam rl.Camera3D, fn func(c *chunk, m rl.Matrix)) {
 		ready = append(ready, k)
 	}
 	renderStats.Pending = max(0, len(dirty)-budget)
-	renderStats.Chunks, renderStats.Verts = 0, 0
+	renderStats.Chunks = 0
 	for _, k := range ready {
 		renderStats.Chunks++
-		renderStats.Verts += int(k.c.opaque.mesh.VertexCount) + int(k.c.trans.mesh.VertexCount)
 		fn(k.c, rl.MatrixTranslate(k.ox, 0, k.oz))
 	}
+}
+
+// sectionVisible decides whether a vertical section of a chunk at the given
+// offset is worth drawing. The deep layer (below the surface terrain) is only
+// drawn near the camera, or when the camera is itself underground.
+func sectionVisible(k int, m rl.Matrix, cam rl.Camera3D, ci, cj int) bool {
+	top := float32((k + 1) * sectionH)
+	if top > float32(groundBase)+4 {
+		return true // holds surface terrain
+	}
+	if cam.Position.Y < float32(groundBase)+6 {
+		return true
+	}
+	cx := float32(ci*chunkSize+chunkSize/2+originX) + m.M12
+	cz := float32(cj*chunkSize+chunkSize/2+originZ) + m.M14
+	dx, dz := cx-cam.Position.X, cz-cam.Position.Z
+	return dx*dx+dz*dz < 56*56
 }
 
 // Draw renders the opaque geometry of all chunks not fully behind the camera.
@@ -2023,8 +2071,11 @@ func (w *World) Draw(cam rl.Camera3D) {
 		w.initGPU()
 	}
 	w.visibleChunks(cam, func(c *chunk, m rl.Matrix) {
-		if c.opaque.loaded {
-			rl.DrawMesh(c.opaque.mesh, w.mat, m)
+		for k := 0; k < chunkSections; k++ {
+			if c.opaque[k].loaded && sectionVisible(k, m, cam, c.ci, c.cj) {
+				renderStats.Verts += int(c.opaque[k].mesh.VertexCount)
+				rl.DrawMesh(c.opaque[k].mesh, w.mat, m)
+			}
 		}
 	})
 }
@@ -2038,8 +2089,11 @@ func (w *World) DrawTranslucent(cam rl.Camera3D) {
 	}
 	rl.DisableBackfaceCulling()
 	w.visibleChunks(cam, func(c *chunk, m rl.Matrix) {
-		if c.trans.loaded {
-			rl.DrawMesh(c.trans.mesh, w.mat, m)
+		for k := 0; k < chunkSections; k++ {
+			if c.trans[k].loaded && sectionVisible(k, m, cam, c.ci, c.cj) {
+				renderStats.Verts += int(c.trans[k].mesh.VertexCount)
+				rl.DrawMesh(c.trans[k].mesh, w.mat, m)
+			}
 		}
 	})
 	rl.EnableBackfaceCulling()

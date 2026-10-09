@@ -23,6 +23,9 @@ import (
 
 var settings = defaultSettings()
 
+var perfFrames int
+var perfSeconds float32
+
 // gameVersion is stamped by cx.sh (-X main.gameVersion=...).
 var gameVersion = "dev"
 
@@ -1700,6 +1703,7 @@ func (g *Game) worldUpdate(dt float32) {
 	for i, t := range targets {
 		seeds[i] = t.Pos
 	}
+	g.Nav.Tick(dt)
 	g.Nav.Update(seeds, g.World)
 	sunny := g.Sky.Elevation() > 0.08
 	for _, e := range g.Enemies {
@@ -1891,6 +1895,7 @@ func (g *Game) draw3D() {
 	w := g.World
 	env := g.Sky.Env(p.HeadWater, float32(rl.GetTime()))
 	w.SetEnv(cam, env)
+	renderStats.Verts = 0
 	rl.BeginMode3D(cam)
 	if !p.HeadWater {
 		g.Sky.DrawDome(cam)
@@ -3364,6 +3369,28 @@ func (g *Game) drawJoin() {
 	}
 }
 
+// benchStep flies a slow lap above the terrain in creative mode: a steady
+// rendering load with no screenshots, so the average frame rate is honest.
+func (g *Game) benchStep(frame int) bool {
+	p := g.Player
+	switch {
+	case frame == 1:
+		g.Reset()
+		settings.Mode, settings.Creative = ModeCreative, true
+		p.Flying = true
+		p.Pos = rl.Vector3Add(g.Spawn, rl.NewVector3(0, 12, 0))
+		p.Pitch = -0.3
+	case frame == 90:
+		perfFrames, perfSeconds = 0, 0 // ignore generation and first builds
+	case frame > 90:
+		p.Yaw += 0.004
+		fwd := p.FlatForward()
+		p.Pos = rl.Vector3Add(p.Pos, rl.Vector3Scale(fwd, 0.12))
+		p.Pos = WrapPos(p.Pos)
+	}
+	return frame >= 700
+}
+
 // scriptedShots drives the screenshot session; returns true when finished.
 func (g *Game) scriptedShots(frame int) bool {
 	switch frame {
@@ -3608,6 +3635,9 @@ func main() {
 	rl.SetTargetFPS(144)
 	rl.SetExitKey(rl.KeyNull)
 	settings = loadSettings()
+	if q := os.Getenv("BLOCKWORLD_QUALITY"); q != "" {
+		settings.Quality = int(q[0] - '0') // test harness override
+	}
 	if playerName == "" {
 		playerName = settings.Name
 	}
@@ -3655,7 +3685,8 @@ func main() {
 	// (day, night, crafting) into the working directory and exits; used for testing.
 	shots := os.Getenv("BLOCKWORLD_SHOTS") != ""
 	soak := os.Getenv("BLOCKWORLD_SOAK") != ""
-	netTest := os.Getenv("BLOCKWORLD_NETTEST") // "host" or "client": scripted multiplayer check
+	netTest := os.Getenv("BLOCKWORLD_NETTEST")   // "host" or "client": scripted multiplayer check
+	bench := os.Getenv("BLOCKWORLD_BENCH") != "" // fly a lap over the terrain and report the frame rate
 	if netTest != "" {
 		rl.SetTargetFPS(60)
 		g.Net = &Net{Name: "Tester-" + netTest}
@@ -3697,12 +3728,15 @@ func main() {
 				break
 			}
 		}
-		if shots || soak {
+		if shots || soak || bench {
 			frame++
 			done := false
-			if shots {
+			switch {
+			case shots:
 				done = g.scriptedShots(frame)
-			} else {
+			case bench:
+				done = g.benchStep(frame)
+			default:
 				done = g.soak(frame)
 			}
 			if done {
@@ -3874,8 +3908,15 @@ func main() {
 			g.drawOverlay()
 		}
 		rl.EndDrawing()
+		if g.State == StatePlaying {
+			perfFrames++
+			perfSeconds += rl.GetFrameTime()
+		}
 	}
-	if g.State != StateMenu && !shots && !soak {
+	if shots || soak || bench {
+		rl.TraceLog(rl.LogInfo, "PERF: frames=%d avgFPS=%.1f lastChunks=%d lastVerts=%dk", perfFrames, float32(perfFrames)/max(perfSeconds, 0.001), renderStats.Chunks, renderStats.Verts/1000)
+	}
+	if g.State != StateMenu && !shots && !soak && !bench {
 		g.leaveWorld() // closing the window keeps the world
 	}
 }

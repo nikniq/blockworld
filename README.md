@@ -257,7 +257,8 @@ A `Makefile` with `run`, `build`, `build-macos`, `build-linux` and `build-window
 
 ### If it runs slowly
 
-Press Esc and use **V** to switch graphics quality. Low renders the scene at half the window's pixel
+`BLOCKWORLD_BENCH=1 ./blockworld` flies a lap over a new world and logs the average frame rate (with
+`BLOCKWORLD_QUALITY=0|1|2` to test a level). Press Esc and use **V** to switch graphics quality. Low renders the scene at half the window's pixel
 size, draws 80 blocks out, skips clouds and keeps distant creatures off screen; Medium is the default
 on Linux and Windows; High is the default on macOS. Chunk meshes now stream in a few per frame rather
 than all at once. **F3** shows an overlay with the frame rate, chunks and vertices drawn, framebuffer

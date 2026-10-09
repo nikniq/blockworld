@@ -14,15 +14,16 @@ const (
 // around trees and ruins by stepping "downhill". It is rebuilt when the player
 // changes column or the world changes.
 type NavGrid struct {
-	N       int
-	Origin  float32
-	Walk    []bool
-	Height  []int
-	Dist    []int32
-	queue   []int32
-	seeds   []int32 // seed cells of the last build
-	valid   bool
-	version int
+	N        int
+	Origin   float32
+	Walk     []bool
+	Height   []int
+	Dist     []int32
+	queue    []int32
+	seeds    []int32 // seed cells of the last build
+	valid    bool
+	version  int
+	cooldown float32 // seconds until the field may rebuild for a moved target
 }
 
 func NewNavGrid(w *World) *NavGrid {
@@ -93,6 +94,12 @@ func (g *NavGrid) Update(targets []rl.Vector3, w *World) {
 	if same {
 		return
 	}
+	// A moving target would rebuild the whole field every block; a quarter of a
+	// second of staleness is invisible to the hostiles following it.
+	if g.valid && w.Version == g.version && g.cooldown > 0 {
+		return
+	}
+	g.cooldown = 0.25
 	g.seeds, g.valid = cells, true
 	for i := range g.Dist {
 		g.Dist[i] = -1
@@ -136,6 +143,9 @@ func (g *NavGrid) Update(targets []rl.Vector3, w *World) {
 		}
 	}
 }
+
+// Tick ages the rebuild cooldown.
+func (g *NavGrid) Tick(dt float32) { g.cooldown = max(0, g.cooldown-dt) }
 
 // Dir returns the flat unit direction an agent at pos should walk to follow
 // the field toward the target. ok is false when pos is already at the goal
