@@ -43,11 +43,11 @@ type qualityParams struct {
 func quality() qualityParams {
 	switch settings.Quality {
 	case 0:
-		return qualityParams{FogEnd: 80, RenderScale: 0.5, EntityDist: 48, Builds: 1, Clouds: false}
+		return qualityParams{FogEnd: 72, RenderScale: 0.5, EntityDist: 48, Builds: 2, Clouds: false}
 	case 1:
-		return qualityParams{FogEnd: 120, RenderScale: 0.75, EntityDist: 80, Builds: 2, Clouds: true}
+		return qualityParams{FogEnd: 110, RenderScale: 0.75, EntityDist: 80, Builds: 3, Clouds: true}
 	}
-	return qualityParams{FogEnd: 190, RenderScale: 1, EntityDist: 160, Builds: 4, Clouds: true}
+	return qualityParams{FogEnd: 160, RenderScale: 1, EntityDist: 140, Builds: 4, Clouds: true}
 }
 
 const (

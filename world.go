@@ -422,6 +422,7 @@ type World struct {
 	blockM    map[Block]*meshBuf // unit cube meshes for item drops
 	envTime   float32
 	envFogEnd float32
+	warmed    bool // chunks in view have been built once
 }
 
 func NewWorld() *World {
@@ -2025,8 +2026,17 @@ func (w *World) visibleChunks(cam rl.Camera3D, fn func(c *chunk, m rl.Matrix)) {
 			}
 		}
 	}
-	// Build the nearest dirty chunks within this frame's budget.
+	// Build the nearest dirty chunks within this frame's budget. The first
+	// frame of a world builds everything in view (the load pause hides it),
+	// and a large backlog (after a teleport or respawn) clears in about a
+	// second rather than trickling in.
 	budget := quality().Builds
+	if !w.warmed {
+		budget = len(dirty)
+		w.warmed = true
+	} else if len(dirty) > 24 {
+		budget = max(budget, len(dirty)/30)
+	}
 	for i := 0; i < len(dirty) && i < budget; i++ {
 		best := i
 		for j := i + 1; j < len(dirty); j++ {
