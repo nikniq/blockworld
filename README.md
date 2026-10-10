@@ -115,7 +115,8 @@ block textures and sound effects are generated at startup.
   rock, waiting to be broken into.
 - **Asteroids**: every so often a rock falls from the sky. A blinking warning gives the bearing, distance and
   a twenty-second countdown while the fireball streaks in; the impact blasts a crater and scatters
-  glowing meteorite, which smelts into iron or rifle ammo.
+  glowing meteorite, which smelts into iron or rifle ammo. The target shows as a pulsing red ring on the
+  minimap and full map (M) during the warning, and each impact site stays marked with an orange X.
 - **Living trees**: damaged trees regrow their leaves, canopies slowly fill out, and oak leaves next to the
   trunk ripen into apple-bearing leaves (red dots). Right click them to pick apples.
 - **Storms**: heavy rain brings lightning: a flash, a bolt, and thunder that rolls in after a delay.

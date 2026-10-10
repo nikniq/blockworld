@@ -23,6 +23,52 @@ type Asteroid struct {
 	Active bool
 }
 
+// Crater marks where an asteroid struck so the map can show it.
+type Crater struct {
+	Pos rl.Vector3
+	Day int
+}
+
+const maxCraters = 6
+
+// addCrater records an impact site; only the latest few are kept.
+func (g *Game) addCrater(at rl.Vector3) {
+	g.Craters = append(g.Craters, Crater{Pos: at, Day: g.Sky.Day})
+	if len(g.Craters) > maxCraters {
+		g.Craters = g.Craters[len(g.Craters)-maxCraters:]
+	}
+}
+
+// drawImpactMarkers draws the inbound asteroid's target and past craters on
+// a map. toMap converts world X/Z to screen; scale is 1 for the minimap and
+// larger for the full map, which also gets labels.
+func (g *Game) drawImpactMarkers(toMap func(x, z float32) (float32, float32), scale float32, labels bool) {
+	orange := rl.NewColor(255, 140, 40, 255)
+	for i, c := range g.Craters {
+		x, y := toMap(c.Pos.X, c.Pos.Z)
+		r := 3 * scale
+		col := orange
+		if i < len(g.Craters)-1 {
+			col = rl.NewColor(200, 110, 40, 200)
+		}
+		rl.DrawLineEx(rl.NewVector2(x-r, y-r), rl.NewVector2(x+r, y+r), 1.5*scale, col)
+		rl.DrawLineEx(rl.NewVector2(x-r, y+r), rl.NewVector2(x+r, y-r), 1.5*scale, col)
+		if labels {
+			rl.DrawText(fmt.Sprintf("impact day %d", c.Day), int32(x)+8, int32(y)-8, 16, col)
+		}
+	}
+	if g.Asteroid.Active {
+		x, y := toMap(g.Asteroid.Target.X, g.Asteroid.Target.Z)
+		pulse := float32(math.Sin(rl.GetTime()*8))*0.5 + 0.5
+		r := (4 + 3*pulse) * scale
+		rl.DrawCircleLines(int32(x), int32(y), r, rl.Red)
+		rl.DrawCircleLines(int32(x), int32(y), r*0.5, rl.NewColor(255, 220, 120, 255))
+		if labels {
+			rl.DrawText(fmt.Sprintf("asteroid in %ds", int(math.Ceil(float64(g.Asteroid.T)))), int32(x)+10, int32(y)-8, 16, rl.Red)
+		}
+	}
+}
+
 // tickAsteroid schedules and runs the event (host and solo only).
 func (g *Game) tickAsteroid(dt float32) {
 	if settings.Difficulty == 0 && !g.Asteroid.Active {
@@ -92,7 +138,8 @@ func (g *Game) asteroidImpact(at rl.Vector3) {
 		v := rl.NewVector3(rand.Float32()*2-1, 3+rand.Float32()*5, rand.Float32()*2-1)
 		g.Sparks = append(g.Sparks, Spark{Pos: at, Vel: rl.Vector3Scale(v, 2), Life: 1.2 + rand.Float32(), Col: rl.NewColor(255, 120+uint8(rand.Intn(100)), 40, 255)})
 	}
-	g.announce("Impact! Meteorite lies in the crater.", 4)
+	g.addCrater(at)
+	g.announce("Impact! Meteorite lies in the crater. Its site is marked on the map.", 4)
 	g.Shake = max(g.Shake, 1.5)
 	g.unlock(AchMeteor)
 }

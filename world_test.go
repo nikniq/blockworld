@@ -1074,6 +1074,15 @@ func TestRegrowthAndAsteroid(t *testing.T) {
 	if met == 0 {
 		t.Fatal("impact should leave meteorite")
 	}
+	if len(g.Craters) != 1 || WrapDist(g.Craters[0].Pos, at) > 0.01 {
+		t.Fatalf("impact should be recorded for the map: %+v", g.Craters)
+	}
+	for i := 0; i < maxCraters+3; i++ {
+		g.addCrater(at)
+	}
+	if len(g.Craters) != maxCraters {
+		t.Fatalf("craters should be capped at %d, got %d", maxCraters, len(g.Craters))
+	}
 	if w.Get(floorI(at.X), floorI(at.Y)-1, floorI(at.Z)) != Air && w.Get(floorI(at.X), floorI(at.Y)-2, floorI(at.Z)) != Air {
 		t.Fatal("impact should crater the ground")
 	}
