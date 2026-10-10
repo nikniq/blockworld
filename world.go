@@ -1884,10 +1884,11 @@ func (w *World) initGPU() {
 	img := rl.NewImageFromImage(buildAtlas())
 	w.tex = rl.LoadTextureFromImage(img)
 	rl.UnloadImage(img)
-	// Crisp up close, mipmapped in the distance so far-off blocks stop shimmering.
+	// Painterly tiles are meant to blur softly: trilinear filtering, so the
+	// brushwork blends up close and far-off blocks stop shimmering.
 	rl.GenTextureMipmaps(&w.tex)
-	rl.TextureParameters(w.tex.ID, rl.TextureMinFilter, rl.TextureFilterNearestMipLinear)
-	rl.TextureParameters(w.tex.ID, rl.TextureMagFilter, 0x2600)
+	rl.TextureParameters(w.tex.ID, rl.TextureMinFilter, 0x2703) // GL_LINEAR_MIPMAP_LINEAR
+	rl.TextureParameters(w.tex.ID, rl.TextureMagFilter, rl.TextureFilterLinear)
 	w.mat = rl.LoadMaterialDefault()
 	w.mat.GetMap(rl.MapDiffuse).Texture = w.tex
 	w.shader = rl.LoadShaderFromMemory(vertexShader, terrainFragment)

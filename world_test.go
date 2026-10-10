@@ -212,7 +212,7 @@ func TestAtlas(t *testing.T) {
 	img := buildAtlas()
 	for b := Block(1); b < numBlocks; b++ {
 		r := TileRect(b, 1)
-		c := img.RGBAAt(int(r.X)+8, int(r.Y)+8)
+		c := img.RGBAAt(int(r.X)+tileSize/2, int(r.Y)+tileSize/2)
 		if blocks[b].Trans {
 			if c.A == 255 {
 				t.Errorf("%s should be translucent", blocks[b].Name)

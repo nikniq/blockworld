@@ -153,7 +153,11 @@ block textures and sound effects are generated at startup.
 - **Lighting**: sunlight and block light propagate through the world, so caves and sealed rooms are
   pitch black and nights are dim. You start with forty **torches**; craft more (coal ore + planks) and place them anywhere to light
   your mine or base. Hostiles and dropped items are lit by the cell they stand in.
-- Textured blocks with ambient occlusion and smooth lighting, fog, drifting clouds, stars and a sun and moon.
+- **Painterly art style**: no pixel-art tiles. Every block texture is generated at startup as a 64x64
+  hand-painted-looking wash: broad light and dark tones, a drift between warmer and cooler hues, brush
+  strokes along the grain, and soft gradient seams for planks, bricks and cobbles instead of hard pixel
+  lines. The atlas is filtered trilinearly so the brushwork blends up close and stays calm at a distance.
+- Blocks have ambient occlusion and smooth lighting, fog, drifting clouds, stars and a sun and moon.
   The scene is anti-aliased with an FXAA pass and finished with a soft vignette (A on the pause screen
   toggles it). Plants are crossed quads rather than boxes, faces brighten as they turn toward the sun
   through the day, broken blocks shatter into textured chips, and the held block is a real cube in hand.
@@ -326,7 +330,7 @@ multiplayer session on port 7799 and log whether the client received the world, 
 | `net.go` | Multiplayer: host listener, client connection, gob messages, snapshots |
 | `sky.go` | Day/night cycle, sky and fog colours, sun, moon, stars and clouds |
 | `world.go` | Voxel volume, terrain/cave/ore generation, sunlight and torch light propagation, chunk meshing with ambient occlusion and smooth lighting, terrain and entity shaders (fog, daylight), collision, DDA raycast, spawn points |
-| `textures.go` | Procedural 16x16 block texture atlas |
+| `textures.go` | Procedural painterly 64x64 block texture atlas |
 | `nav.go` | Flow-field pathfinding over the ground (breadth-first from the player's column, 1-block climbs) |
 | `audio.go` | Procedurally synthesised sound effects |
 | `score.go` | High score persistence in the user config directory |
