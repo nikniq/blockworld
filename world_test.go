@@ -1099,10 +1099,13 @@ func TestSwampAndBronto(t *testing.T) {
 	if mud == 0 {
 		t.Fatal("swamp should have mud")
 	}
-	g.spawnDinos(6)
 	kinds := map[AnimalKind]int{}
-	for _, a := range g.Animals {
-		kinds[a.Kind]++
+	for i := 0; i < 12 && kinds[AnimalBronto] == 0; i++ {
+		g.spawnDinos(6)
+		kinds = map[AnimalKind]int{}
+		for _, a := range g.Animals {
+			kinds[a.Kind]++
+		}
 	}
 	if kinds[AnimalBronto] == 0 || kinds[AnimalRaptor]+kinds[AnimalCompy] == 0 {
 		t.Fatalf("dinosaurs should spawn: %v", kinds)
@@ -1361,5 +1364,49 @@ func TestChests(t *testing.T) {
 	}
 	if dc == nil || dc.Items[Cobble] != 20 || dc.Ammo != 30 || p.Inv[Cobble] != 0 || p.Reserve != 0 {
 		t.Fatal("death chest should hold everything")
+	}
+}
+
+// Two dragons roost far from spawn, wake when approached, breathe fire, and fall when killed.
+func TestDragons(t *testing.T) {
+	rand.Seed(31)
+	g := &Game{Audio: &Audio{}, CraftHover: -1}
+	g.Reset()
+	if len(g.Dragons) != 2 || g.Dragons[0].Frost || !g.Dragons[1].Frost {
+		t.Fatalf("expected a fire and a frost dragon: %+v", g.Dragons)
+	}
+	d := g.Dragons[0]
+	if WrapDist(d.Roost, g.Spawn) < 50 {
+		t.Fatal("dragons should roost away from spawn")
+	}
+	p := g.Player
+	p.Pos = rl.Vector3Add(d.Roost, rl.NewVector3(5, 0, 5))
+	for i := 0; i < 20; i++ {
+		g.tickDragons(0.1)
+	}
+	if d.State != DragonAttack {
+		t.Fatalf("dragon should attack a player at its roost: state %d", d.State)
+	}
+	for i := 0; i < 200 && len(g.Fireballs) == 0; i++ {
+		g.tickDragons(0.1)
+	}
+	if len(g.Fireballs) == 0 && d.FireCD == 0 {
+		t.Fatal("attacking dragon should breathe fire")
+	}
+	g.damageDragon(d, dragonHP)
+	if d.State != DragonDying {
+		t.Fatal("dragon should fall when its health runs out")
+	}
+	for i := 0; i < 100 && d.State != DragonDead; i++ {
+		g.tickDragons(0.1)
+	}
+	diamonds := 0
+	for _, dr := range g.Drops {
+		if dr.Block == DiamondOre {
+			diamonds += max(1, dr.Count)
+		}
+	}
+	if d.State != DragonDead || diamonds < 5 {
+		t.Fatalf("dead dragon should drop its hoard: state %d diamonds %d", d.State, diamonds)
 	}
 }

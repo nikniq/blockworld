@@ -45,6 +45,8 @@ const (
 	SkinCroc
 	SkinBronto
 	SkinRaptor
+	SkinDragon
+	SkinFrostDragon
 	numSkins
 )
 
@@ -517,6 +519,39 @@ func paintSkin(kind SkinKind, part, face, x, y int) rl.Color {
 			return shade(col(60, 50, 40)) // claw
 		}
 		return shade(hide)
+	case SkinDragon, SkinFrostDragon:
+		hide := col(170, 40, 30)
+		belly := col(220, 160, 70)
+		if kind == SkinFrostDragon {
+			hide, belly = col(120, 170, 220), col(220, 240, 255)
+		}
+		if face == 1 {
+			hide = belly
+		}
+		if part == PartArmR {
+			// Wing membrane between dark bones.
+			if x%5 == 0 {
+				return shade(mul(hide, 0.55))
+			}
+			return shade(mul(hide, 0.85))
+		}
+		if part == PartHead {
+			if face == 4 {
+				if y >= 10 && x%2 == 0 {
+					return rl.NewColor(240, 240, 230, 255) // fangs
+				}
+				if y >= 5 && y <= 6 && (x == 3 || x == 4 || x == 11 || x == 12) {
+					return col(250, 220, 50) // burning eyes
+				}
+			}
+			if face == 0 && (x <= 2 || x >= 13) && y <= 6 {
+				return shade(mul(hide, 0.6)) // horns
+			}
+		}
+		if (part == PartBody || part == PartExtra) && face == 0 && x >= 7 && x <= 8 && y%3 == 0 {
+			return shade(mul(hide, 0.5)) // spines along the back
+		}
+		return shade(hide)
 	case SkinSheep:
 		wool := col(232, 232, 226)
 		if part == PartHead {
@@ -562,7 +597,7 @@ func materialOf(kind SkinKind, part int) material {
 		return matMetal
 	case SkinSkeleton:
 		return matBone
-	case SkinCreeper, SkinCroc, SkinDino, SkinRaptor, SkinBronto:
+	case SkinCreeper, SkinCroc, SkinDino, SkinRaptor, SkinBronto, SkinDragon, SkinFrostDragon:
 		return matScale
 	case SkinSpider, SkinPig, SkinCow, SkinSheep, SkinWolf, SkinCat, SkinCatBlack, SkinCatTabby, SkinHorse, SkinHorseBlack, SkinHorseWhite, SkinKangaroo, SkinEmu, SkinKoala, SkinWombat, SkinPlatypus:
 		return matFur

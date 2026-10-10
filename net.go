@@ -99,6 +99,8 @@ type Snapshot struct {
 	Primed   []Primed
 	Arrows   []Arrow
 	Flags    []Flag
+	Dragons  []Dragon
+	Fire     []Fireball
 }
 
 type FxKind int
@@ -434,6 +436,10 @@ func (g *Game) makeSnapshot() *Snapshot {
 	s.Primed = g.Primed
 	s.Arrows = g.Arrows
 	s.Flags = g.Flags
+	for _, d := range g.Dragons {
+		s.Dragons = append(s.Dragons, *d)
+	}
+	s.Fire = g.Fireballs
 	return s
 }
 
@@ -814,6 +820,12 @@ func (g *Game) applySnapshot(s *Snapshot) {
 	g.Primed = s.Primed
 	g.Arrows = s.Arrows
 	g.Flags = s.Flags
+	g.Dragons = g.Dragons[:0]
+	for i := range s.Dragons {
+		d := s.Dragons[i]
+		g.Dragons = append(g.Dragons, &d)
+	}
+	g.Fireballs = s.Fire
 }
 
 // ---------- shared ----------

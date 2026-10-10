@@ -112,6 +112,8 @@ type Game struct {
 	Mount          *Animal
 	Flags          []Flag
 	Chests         map[ChestKey]*Chest
+	Dragons        []*Dragon
+	Fireballs      []Fireball
 	OpenChest      *Chest
 	OpenChestPos   [3]int
 	Villages       []Village
@@ -219,6 +221,8 @@ func (g *Game) Reset() {
 	g.WarRed, g.WarBlue = false, false
 	g.Chests = map[ChestKey]*Chest{}
 	g.setupFactions()
+	g.Fireballs = nil
+	g.spawnDragons()
 	settings.applyMode()
 	g.Hordes, g.HordeCD, g.Survived = 0, 25, 0
 	switch settings.Mode {
@@ -467,6 +471,11 @@ func (g *Game) fire() {
 			target = nil
 		}
 	}
+	dragon, dd := g.hitDragon(ray, bestD)
+	if dragon != nil {
+		bestD = dd
+		target, animal = nil, nil
+	}
 	end := rl.Vector3Add(eye, rl.Vector3Scale(dir, min(bestD, 200)))
 	// Tracer starts from a "muzzle" slightly right/below the eye.
 	muzzle := rl.Vector3Add(eye, rl.Vector3Add(rl.Vector3Scale(p.Right(), 0.25), rl.NewVector3(0, -0.2, 0)))
@@ -476,6 +485,13 @@ func (g *Game) fire() {
 	g.Audio.Play(g.Audio.Shoot, 0.9)
 	g.sendFx(Fx{Kind: FxShot, Pos: eye})
 
+	if dragon != nil && !g.isClient() {
+		g.HitMark = 0.15
+		g.Audio.Play(g.Audio.Hit, 0.7)
+		g.burst(end, rl.NewColor(255, 120, 60, 255), 10)
+		g.damageDragon(dragon, 3)
+		return
+	}
 	if g.isClient() {
 		// The host resolves damage; we only show feedback.
 		if target != nil || animal != nil {
@@ -601,6 +617,13 @@ func (g *Game) attack() {
 		} else if a := p.Aim; a.Hit && g.World.Get(a.X, a.Y, a.Z) == TNT {
 			g.sendToHost(&Msg{Prime: &struct{ X, Y, Z int }{a.X, a.Y, a.Z}})
 		}
+		return
+	}
+	if dragon, dd := g.hitDragon(ray, swordReach+1); dragon != nil && dd < best+1 {
+		g.HitMark = 0.15
+		g.Audio.Play(g.Audio.Hit, 0.7)
+		g.burst(rl.Vector3Add(eye, rl.Vector3Scale(ray.Direction, dd)), rl.NewColor(255, 120, 60, 255), 8)
+		g.damageDragon(dragon, p.SwordDamage()*2)
 		return
 	}
 	if animal != nil {
@@ -1128,6 +1151,13 @@ func (g *Game) soak(frame int) bool {
 		g.World.RegrowTrees(0, 1)
 	}
 	if frame%650 == 0 {
+		for _, d := range g.Dragons {
+			if d.State == DragonCircle {
+				d.Pos = rl.Vector3Add(p.Pos, rl.NewVector3(0, 10, 10))
+				g.damageDragon(d, 40)
+				break
+			}
+		}
 		q := w.RandomFreePoint(p.Pos, 4)
 		g.Enemies = append(g.Enemies, NewEnemy(q, KindGiant, 5))
 		x, z := floorI(p.Pos.X)+2, floorI(p.Pos.Z)
@@ -1779,6 +1809,7 @@ func (g *Game) worldUpdate(dt float32) {
 	g.captureTick(dt)
 	g.raids(dt)
 	g.growVillages(dt)
+	g.tickDragons(dt)
 	g.updateSleep(dt)
 }
 
@@ -1988,6 +2019,7 @@ func (g *Game) draw3D() {
 	g.drawAsteroid(cam)
 	w.BeginShader()
 	g.drawFlags(cam)
+	g.drawDragons(cam)
 	w.EndShader()
 	for _, s := range g.Sparks {
 		if s.Block != Air {
@@ -2784,6 +2816,7 @@ func (g *Game) drawHelp(sw, sh int32) {
 		"The deep: below the dark stone lie vast caverns, lakes, ravines, glowshrooms, amethyst, diamonds and cave spiders.",
 		"Modes (O on the menu, G in pause): Survival, Creative, Zombie (endless night, growing hordes), Battle (factions at war with you).",
 		"War: Redfort and Bluehaven send warbands to capture flags. Stand by a flag 8s to capture it. Craft a Village Flag to found your own.",
+		"Two dragons roost on the highest peak and the snowy taiga. Keep your distance, or bring arrows: 150 health, diamonds when slain.",
 		"Dinosaurs: brontosaur herds browse the swamp willows, raptor packs and compys roam the outback, the tyrannosaur hunts alone.",
 		"Asteroids fall now and then: heed the warning and its bearing. Mine the meteorite. Trees regrow leaves; pick apples off red-dotted leaves.",
 		"H closes this help",
@@ -2885,6 +2918,10 @@ func (g *Game) drawMinimap(sw int32) {
 		c := g.flagCounts()
 		rl.DrawRectangle(mx, my+size+52, size, 20, rl.NewColor(0, 0, 0, 140))
 		rl.DrawText(fmt.Sprintf("Flags  You %d  Red %d  Blue %d  Free %d", c[FactionPlayer], c[FactionRed], c[FactionBlue], c[FactionNone]), mx+6, my+size+55, 14, rl.LightGray)
+	}
+	if hint := g.dragonHint(); hint != "" {
+		rl.DrawRectangle(mx, my+size+76, size, 20, rl.NewColor(0, 0, 0, 140))
+		rl.DrawText(hint, mx+6, my+size+79, 14, rl.NewColor(255, 120, 80, 255))
 	}
 	if hint := g.beaconHint(); hint != "" {
 		rl.DrawRectangle(mx, my+size+28, size, 20, rl.NewColor(0, 0, 0, 140))
@@ -3441,10 +3478,20 @@ func (g *Game) scriptedShots(frame int) bool {
 	case 200:
 		// Hover above the line-up so every creature is in frame.
 		settings.Creative, g.Player.Flying = true, true
-		g.Player.Pos = rl.Vector3Add(g.Spawn, rl.NewVector3(0, 4, -4))
-		g.Player.Pitch = -0.35
+		g.Player.Pos = rl.Vector3Add(g.Spawn, rl.NewVector3(0, 18, -8))
+		g.Player.Pitch = 0.1
 		g.Player.Yaw = math.Pi
-	case 203:
+	case 202:
+		if len(g.Dragons) > 0 {
+			d := g.Dragons[0]
+			// Yaw pi looks down -Z. Roost beyond alert range so it keeps circling,
+			// with its circle point 24 nearer the camera.
+			d.Roost = rl.Vector3Add(g.Player.Pos, rl.NewVector3(0, -dragonHeight, -42))
+			d.Angle = math.Pi / 2
+			d.Pos = rl.Vector3Add(g.Player.Pos, rl.NewVector3(0, 2, -18))
+			d.Vel = rl.NewVector3(-6, 0, 0)
+		}
+	case 204: // two frames later: the screenshot reads the previously presented frame
 		rl.TakeScreenshot("shot_sky.png")
 		settings.Creative, g.Player.Flying = false, false
 		g.Player.Pos = g.Spawn

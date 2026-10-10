@@ -39,6 +39,7 @@ const (
 	AchFlag
 	AchFound
 	AchConquer
+	AchDragon
 	numAch
 )
 
@@ -73,6 +74,7 @@ var achievements = [numAch]achievement{
 	AchFlag:        {"Standard Bearer", "Capture a flag"},
 	AchFound:       {"Founder", "Plant your own village flag"},
 	AchConquer:     {"Sovereign", "Hold every flag on the map"},
+	AchDragon:      {"Dragonslayer", "Bring down a dragon"},
 }
 
 type Toast struct {

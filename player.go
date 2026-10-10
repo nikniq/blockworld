@@ -74,6 +74,7 @@ type Player struct {
 	Hunger    float32 // 0..20, drains with time and effort
 	StarveT   float32
 	Knock     rl.Vector3 // knockback velocity from a hit
+	FrostT    float32    // seconds of frost-dragon chill (slowed)
 	Mounted   bool       // riding a horse or boat; the game moves the mount
 	MountMove rl.Vector3 // steering input while mounted
 	MountJump bool
@@ -350,6 +351,10 @@ func (p *Player) Update(dt float32, w *World) {
 	if p.Hunger <= 6 && !settings.Creative {
 		p.Sprinting = false // too hungry to run
 	}
+	p.FrostT = max(0, p.FrostT-dt)
+	if p.FrostT > 0 {
+		p.Sprinting = false
+	}
 	speed := float32(walkSpeed)
 	if p.Sneak {
 		speed = sneakSpeed
@@ -385,6 +390,9 @@ func (p *Player) Update(dt float32, w *World) {
 	if p.InWater {
 		speed *= 0.55
 		p.Sprinting = false
+	}
+	if p.FrostT > 0 {
+		speed *= 0.5
 	}
 	var delta rl.Vector3
 	if moving {

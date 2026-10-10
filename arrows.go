@@ -47,6 +47,11 @@ func (g *Game) playerShoot() {
 
 // arrowHitsCreature applies a player's arrow to the first hostile or animal on its path.
 func (g *Game) arrowHitsCreature(a *Arrow, ray rl.Ray, step float32) bool {
+	if d, dd := g.hitDragon(ray, step); d != nil && dd <= step {
+		g.burst(a.Pos, rl.NewColor(255, 120, 60, 255), 6)
+		g.damageDragon(d, playerArrowDamage*2)
+		return true
+	}
 	for _, e := range g.Enemies {
 		if !e.Alive {
 			continue

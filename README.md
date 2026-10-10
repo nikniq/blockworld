@@ -60,6 +60,11 @@ block textures and sound effects are generated at startup.
   Stone needs a pickaxe tier; iron ore needs stone, gold and diamond ore need iron.
 - **Crafting (E)**: logs to planks, torches, TNT, ladders, beds, cobblestone to stone bricks, sand to glass, ore to rifle ammo,
   and stone/iron/diamond swords and pickaxes. Better pickaxes mine faster; better swords hit harder.
+- **Two dragons** rule the skies: a fire dragon circling the highest peak and a frost dragon over the
+  snowy taiga. Come within forty blocks of a roost, or hurt one, and it hunts you: fireballs that scorch
+  the ground (frost ones chill and slow you), dives that bite for heavy damage. They have 150 health;
+  the sword does double damage and arrows too. A slain dragon crashes down and leaves diamonds, gold and
+  ammo, and the compass panel warns when one is near.
 - **Dinosaurs** of several sizes. A tyrannosaur roams every world: three blocks tall, it thuds and
   roars, ignores you until hurt, then charges and bites. Brontosaur herds live in the **swamps**, a new
   biome of mud, pools, reeds, marsh lights and drooping willows: they are twice the tyrannosaur's size,
