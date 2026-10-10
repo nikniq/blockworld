@@ -112,6 +112,7 @@ const (
 	FxShot
 	FxMessage
 	FxAsteroid
+	FxQuake
 )
 
 type Fx struct {
@@ -743,6 +744,10 @@ func (g *Game) clientHandle(m *Msg) {
 		case FxAsteroid:
 			g.Asteroid = Asteroid{Target: fx.Pos, T: fx.Shake, Active: true}
 			g.Audio.Play(g.Audio.Alarm, 0.9)
+		case FxQuake:
+			g.Quake = Quake{Epi: fx.Pos, Dir: fx.Shake, Active: true}
+			g.Faults = append(g.Faults, Fault{Pos: fx.Pos, Dir: fx.Shake, Day: g.Sky.Day})
+			g.Audio.Play(g.Audio.Thunder, 1)
 		}
 	}
 }

@@ -1419,3 +1419,74 @@ func TestDragons(t *testing.T) {
 		t.Fatalf("dead dragon should drop its hoard: state %d diamonds %d", d.State, diamonds)
 	}
 }
+
+// Earthquakes shift the ground along a fault, open a fissure, spare built
+// blocks and never bury the player.
+func TestEarthquake(t *testing.T) {
+	rand.Seed(31)
+	g := &Game{Audio: &Audio{}, CraftHover: -1}
+	g.Reset()
+	w := g.World
+	// Find a dry epicentre away from villages so the shift is not all protected.
+	var epi rl.Vector3
+	for try := 0; try < 400; try++ {
+		x, z := rand.Intn(worldW)+originX, rand.Intn(worldD)+originZ
+		y := w.SurfaceY(x, z)
+		epi = rl.NewVector3(float32(x)+0.5, float32(y), float32(z)+0.5)
+		if y > seaLevel+4 && !g.quakeProtected(x, z) {
+			break
+		}
+	}
+	ex, ez := floorI(epi.X), floorI(epi.Z)
+	// A built block near the epicentre must not move.
+	bx, bz := ex+6, ez+6
+	by := w.SurfaceY(bx, bz)
+	w.Set(bx, by, bz, Planks)
+	g.Player.Pos = rl.NewVector3(epi.X+3, float32(w.SurfaceY(ex+3, ez)), epi.Z)
+	before := map[[2]int]int{}
+	for oz := -30; oz <= 30; oz++ {
+		for ox := -30; ox <= 30; ox++ {
+			before[[2]int{ex + ox, ez + oz}] = w.SurfaceY(ex+ox, ez+oz)
+		}
+	}
+	g.startQuake(epi, 0.3)
+	if !g.Quake.Active || len(g.Faults) != 1 {
+		t.Fatal("quake should be active and recorded for the map")
+	}
+	g.Quake.T = quakeWarn
+	for i := 0; i < 80; i++ {
+		g.tickQuake(0.1)
+	}
+	if g.Quake.Active {
+		t.Fatal("quake should finish after its duration")
+	}
+	up, down, deep := 0, 0, 0
+	for k, h := range before {
+		now := w.SurfaceY(k[0], k[1])
+		switch {
+		case now == h+1:
+			up++
+		case now == h-1:
+			down++
+		case now <= h-3:
+			deep++
+		}
+	}
+	t.Logf("columns up %d down %d fissure %d", up, down, deep)
+	if up < 50 || down < 50 {
+		t.Fatalf("expected ground to shift both ways: up %d down %d", up, down)
+	}
+	if deep < 5 {
+		t.Fatalf("expected a fissure along the fault, got %d deep columns", deep)
+	}
+	if w.Get(bx, by, bz) != Planks {
+		t.Fatal("built block should not move")
+	}
+	p := g.Player.Pos
+	if blocks[w.Get(floorI(p.X), floorI(p.Y+0.1), floorI(p.Z))].Solid {
+		t.Fatal("player should not be buried by the uplift")
+	}
+	if !g.Got[AchQuake] {
+		t.Fatal("surviving a quake should unlock the achievement")
+	}
+}

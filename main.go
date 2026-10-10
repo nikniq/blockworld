@@ -100,6 +100,9 @@ type Game struct {
 	DeepCD      float32
 	Asteroid    Asteroid
 	Craters     []Crater
+	Quake       Quake
+	QuakeCD     float32
+	Faults      []Fault
 	AsteroidCD  float32
 	RegrowCD    float32
 	RegrowSlice int
@@ -249,6 +252,9 @@ func (g *Game) Reset() {
 	g.Won = false
 	g.Asteroid = Asteroid{}
 	g.Craters = nil
+	g.Quake = Quake{}
+	g.QuakeCD = quakeEvery * 0.7
+	g.Faults = nil
 	g.AsteroidCD = asteroidEvery * 0.5
 	g.say("Day 1  -  mine, craft and build before dark. Find and light the ancient beacon.", 5)
 }
@@ -1108,6 +1114,10 @@ func (g *Game) soak(frame int) bool {
 			}
 		}
 	}
+	if frame%900 == 450 {
+		g.startQuake(rl.Vector3Add(p.Pos, rl.NewVector3(8, 0, 4)), rand.Float32()*3)
+		g.Quake.T = quakeWarn
+	}
 	if frame%150 == 0 {
 		x, z := floorI(p.Pos.X)+rand.Intn(9)-4, floorI(p.Pos.Z)+rand.Intn(9)-4
 		y := w.SurfaceY(x, z)
@@ -1807,6 +1817,7 @@ func (g *Game) worldUpdate(dt float32) {
 	g.tickSpawners(dt)
 	g.tickDeep(dt)
 	g.tickAsteroid(dt)
+	g.tickQuake(dt)
 	g.tickRegrow(dt)
 	g.captureTick(dt)
 	g.raids(dt)
@@ -1847,6 +1858,16 @@ func (g *Game) clientUpdate(dt float32) {
 		if g.Asteroid.T <= 0 {
 			g.Asteroid.Active = false
 			g.addCrater(g.Asteroid.Target) // the host's blast arrives as block updates
+		}
+	}
+	if g.Quake.Active {
+		g.Quake.T += dt
+		g.Shake = max(g.Shake, 0.35)
+		if g.Quake.T >= quakeWarn {
+			g.Shake = max(g.Shake, 0.9)
+		}
+		if g.Quake.T >= quakeWarn+quakeDur {
+			g.Quake.Active = false
 		}
 	}
 	g.tickEffects(dt)
@@ -2640,6 +2661,20 @@ func (g *Game) drawHUD() {
 
 	g.drawMinimap(sw)
 
+	if g.Quake.Active && !g.Asteroid.Active {
+		warn := "EARTHQUAKE  -  " + g.quakeBearing()
+		if g.Quake.T < quakeWarn {
+			warn = "TREMOR  -  " + g.quakeBearing()
+		}
+		fs := int32(26)
+		tw := rl.MeasureText(warn, fs)
+		c := rl.NewColor(255, 230, 90, 255)
+		if int(rl.GetTime()*4)%2 == 0 {
+			c = rl.NewColor(255, 170, 60, 255)
+		}
+		rl.DrawRectangle(cx-tw/2-12, 170, tw+24, 36, rl.NewColor(0, 0, 0, 170))
+		rl.DrawText(warn, cx-tw/2, 175, fs, c)
+	}
 	if g.Asteroid.Active {
 		warn := "ASTEROID  -  " + g.asteroidBearing()
 		fs := int32(26)
@@ -2788,12 +2823,13 @@ func (g *Game) drawFullMap(sw, sh int32) {
 		rl.DrawText("beacon", int32(bx)+10, int32(by)-8, 16, rl.NewColor(120, 220, 255, 255))
 	}
 	g.drawImpactMarkers(toMap, 2, true)
+	g.drawFaultMarkers(toMap, 2, true)
 	p := g.Player
 	x, y := toMap(p.Pos.X, p.Pos.Z)
 	f := p.FlatForward()
 	rl.DrawLineEx(rl.NewVector2(x, y), rl.NewVector2(x+f.X*16, y+f.Z*16), 3, rl.White)
 	rl.DrawCircle(int32(x), int32(y), 5, rl.White)
-	rl.DrawText("MAP   white: you   blue: spawn   red: hostiles   pink: animals   orange X: asteroid impact   M closes", mx, my+size+10, 16, rl.LightGray)
+	rl.DrawText("MAP   white: you   blue: spawn   red: hostiles   pink: animals   orange X: asteroid impact   yellow: fault line   M closes", mx, my+size+10, 16, rl.LightGray)
 }
 
 // drawHelp lists the controls over the game.
@@ -2822,7 +2858,7 @@ func (g *Game) drawHelp(sw, sh int32) {
 		"War: Redfort and Bluehaven send warbands to capture flags. Stand by a flag 8s to capture it. Craft a Village Flag to found your own.",
 		"Two dragons roost on the highest peak and the snowy taiga. Keep your distance, or bring arrows: 150 health, diamonds when slain.",
 		"Dinosaurs: brontosaur herds browse the swamp willows, raptor packs and compys roam the outback, the tyrannosaur hunts alone.",
-		"Asteroids fall now and then: heed the warning and its bearing; the target and past craters show on the map (M). Mine the meteorite. Trees regrow leaves; pick apples off red-dotted leaves.",
+		"Asteroids fall now and then: heed the warning and its bearing; the target and past craters show on the map (M). Mine the meteorite. Earthquakes heave and drop the ground along a fault line; mind the fissure. Trees regrow leaves; pick apples off red-dotted leaves.",
 		"H closes this help",
 	}
 	w := int32(760)
@@ -2940,6 +2976,7 @@ func (g *Game) drawMinimap(sw int32) {
 		rl.DrawRectanglePro(rl.NewRectangle(bx, by, 8, 8), rl.NewVector2(4, 4), 45, rl.NewColor(120, 220, 255, 255))
 	}
 	g.drawImpactMarkers(toMap, 1, false)
+	g.drawFaultMarkers(toMap, 1, false)
 	for _, f := range g.Flags {
 		fx, fy := toMap(f.Pos.X, f.Pos.Z)
 		rl.DrawRectangle(int32(fx)-2, int32(fy)-4, 2, 7, rl.White)
@@ -3589,6 +3626,25 @@ func (g *Game) scriptedShots(frame int) bool {
 	case 241:
 		rl.TakeScreenshot("shot_map.png")
 		g.ShowMap = false
+		// A full quake instantly, fault running across the view.
+		f := g.Player.FlatForward()
+		epi := rl.Vector3Add(g.Player.Pos, rl.Vector3Scale(f, 10))
+		epi.Y = float32(g.World.SurfaceY(floorI(epi.X), floorI(epi.Z)))
+		g.startQuake(epi, g.Player.Yaw+math.Pi/2)
+		g.Quake.T = quakeWarn
+		g.quakeShift(quakeRadius)
+		g.Quake.Active = false
+		g.Shake = 0
+		g.Sky.T = 0.3 // daylight, from the air, looking down at the fault
+		settings.Creative, g.Player.Flying = true, true
+		g.Player.Pos = rl.Vector3Add(epi, rl.Vector3Add(rl.Vector3Scale(f, -14), rl.NewVector3(0, 12, 0)))
+		g.Player.Pitch = -0.6
+	case 247:
+		rl.TakeScreenshot("shot_quake.png")
+		g.Sky.T = 0.72
+		settings.Creative, g.Player.Flying = false, false
+		g.Player.Pos = g.Spawn
+		g.Player.Pitch = -0.1
 	case 240:
 		g.Sky.T = 0.72
 		g.Player.Pitch = -0.1

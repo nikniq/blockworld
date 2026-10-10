@@ -117,6 +117,10 @@ block textures and sound effects are generated at startup.
   a twenty-second countdown while the fireball streaks in; the impact blasts a crater and scatters
   glowing meteorite, which smelts into iron or rifle ammo. The target shows as a pulsing red ring on the
   minimap and full map (M) during the warning, and each impact site stays marked with an orange X.
+- **Earthquakes**: now and then the ground rumbles for a few seconds, then a fault tears across the land
+  near you: one side heaves up, the other drops, and a fissure opens along the line (sometimes down to
+  lava). Trees and loose ground ride the shift; villages, flags, the beacon and anything built stay put.
+  The epicentre pulses on the map during the quake and the fault line stays marked afterwards.
 - **Living trees**: damaged trees regrow their leaves, canopies slowly fill out, and oak leaves next to the
   trunk ripen into apple-bearing leaves (red dots). Right click them to pick apples.
 - **Storms**: heavy rain brings lightning: a flash, a bolt, and thunder that rolls in after a delay.

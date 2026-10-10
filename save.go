@@ -43,6 +43,7 @@ type SaveData struct {
 	Chests    map[ChestKey]*Chest
 	Dragons   []*Dragon
 	Craters   []Crater
+	Faults    []Fault
 	Hunger    float32
 	SkyT      float32
 	Day       int
@@ -122,7 +123,7 @@ func (g *Game) saveErr() error {
 		Pos: pl.Pos, Yaw: pl.Yaw, Pitch: pl.Pitch, HP: pl.HP, Ammo: pl.Ammo, Reserve: pl.Reserve,
 		Inv: pl.Inv[:], SwordTier: pl.SwordTier, PickTier: pl.PickTier, ArmorTier: pl.ArmorTier,
 		Spawn: g.Spawn, Deaths: g.Deaths, Hunger: pl.Hunger, Won: g.Won, Lost: g.VillagersLost,
-		Flags: g.Flags, Villages: g.Villages, WarRed: g.WarRed, WarBlue: g.WarBlue, Mode: settings.Mode, Hordes: g.Hordes, Chests: g.Chests, Dragons: g.Dragons, Craters: g.Craters,
+		Flags: g.Flags, Villages: g.Villages, WarRed: g.WarRed, WarBlue: g.WarBlue, Mode: settings.Mode, Hordes: g.Hordes, Chests: g.Chests, Dragons: g.Dragons, Craters: g.Craters, Faults: g.Faults,
 		SkyT: g.Sky.T, Day: g.Sky.Day, Night: g.Night, Score: g.Score, Kills: g.Kills,
 	}
 	for _, a := range g.Animals {
@@ -191,6 +192,7 @@ func (g *Game) load() bool {
 		g.Chests = d.Chests
 	}
 	g.Craters = d.Craters
+	g.Faults = d.Faults
 	if d.Dragons != nil {
 		g.Dragons = d.Dragons
 	}
