@@ -394,7 +394,7 @@ type World struct {
 	BeaconLit      bool
 	Biome          []Biome                    // per column
 	OnSet          func(x, y, z int, b Block) // called after every Set (multiplayer broadcast)
-	relight        map[int]bool               // chunks whose lighting must be recomputed
+	relight        map[int]*editBox           // chunks with pending edits and the cells they touched
 	chunks         []*chunk
 	ncx            int
 	ncz            int
@@ -459,7 +459,7 @@ func (w *World) finish() {
 			w.recomputeHeight(x, z)
 		}
 	}
-	w.relightRegion(0, 0, worldW, worldD)
+	w.relightRegion(0, 0, worldW, worldD, 0, worldH)
 }
 
 func newEmptyWorld() *World {
@@ -468,7 +468,7 @@ func newEmptyWorld() *World {
 		Height:  make([]int, worldW*worldD),
 		Ground:  make([]int, worldW*worldD),
 		Light:   make([]uint8, worldW*worldH*worldD),
-		relight: map[int]bool{},
+		relight: map[int]*editBox{},
 		ncx:     worldW / chunkSize,
 		ncz:     worldD / chunkSize,
 		blockM:  map[Block]*meshBuf{},
@@ -520,7 +520,8 @@ func brightness(l float32) float32 { return 0.03 + 0.97*l*l }
 // [x0,x1) x [z0,z1) over the full height, seeded by sky exposure, torches and
 // the light already present just outside the region. Chunks whose light
 // changed are marked for re-meshing.
-func (w *World) relightRegion(x0, z0, x1, z1 int) {
+func (w *World) relightRegion(x0, z0, x1, z1, y0, y1 int) {
+	relightCalls++
 	// Regions may run past the edges; columns wrap. A region wider than the
 	// world is the whole world.
 	if x1-x0 >= worldW {
@@ -529,12 +530,34 @@ func (w *World) relightRegion(x0, z0, x1, z1 int) {
 	if z1-z0 >= worldD {
 		z0, z1 = 0, worldD
 	}
-	if x0 >= x1 || z0 >= z1 {
+	if x0 >= x1 || z0 >= z1 || y0 >= y1 {
 		return
 	}
-	inRegion := func(x, z int) bool { return wrapI(x-x0, worldW) < x1-x0 && wrapI(z-z0, worldD) < z1-z0 }
-	old := make([]uint8, 0, (x1-x0)*(z1-z0)*worldH)
-	for y := 0; y < worldH; y++ {
+	// Sunlight below the region depends on whether the column above it is
+	// open. If any column's answer changed, the region must reach the floor.
+	if y0 > 0 {
+		for z := z0; z < z1 && y0 > 0; z++ {
+			for x := x0; x < x1; x++ {
+				open := true
+				for y := worldH - 1; y >= y0-1; y-- {
+					if b := w.getLocal(wrapX(x), y, wrapZ(z)); b != Air && !blocks[b].Tiny {
+						open = false
+						break
+					}
+				}
+				if was := w.Light[cellIndex(x, y0-1, z)]>>4 == 15; was != open {
+					y0 = 0
+					break
+				}
+			}
+		}
+	}
+	relightCells += (x1 - x0) * (z1 - z0) * (y1 - y0)
+	inRegion := func(x, y, z int) bool {
+		return y >= y0 && y < y1 && wrapI(x-x0, worldW) < x1-x0 && wrapI(z-z0, worldD) < z1-z0
+	}
+	old := make([]uint8, 0, (x1-x0)*(z1-z0)*(y1-y0))
+	for y := y0; y < y1; y++ {
 		for z := z0; z < z1; z++ {
 			for x := x0; x < x1; x++ {
 				i := cellIndex(x, y, z)
@@ -547,42 +570,51 @@ func (w *World) relightRegion(x0, z0, x1, z1 int) {
 	// Sunlight falls straight down through air until it hits anything.
 	for z := z0; z < z1; z++ {
 		for x := x0; x < x1; x++ {
-			for y := worldH - 1; y >= 0; y-- {
-				b := w.getLocal(x, y, z)
+			for y := worldH - 1; y >= y0; y-- {
+				b := w.getLocal(wrapX(x), y, wrapZ(z))
 				if b != Air && !blocks[b].Tiny {
 					break
 				}
-				w.Light[cellIndex(x, y, z)] = 15 << 4
-				queue = append(queue, int32(cellIndex(x, y, z)))
+				if y < y1 {
+					w.Light[cellIndex(x, y, z)] = 15 << 4
+					queue = append(queue, int32(cellIndex(x, y, z)))
+				}
 			}
 		}
 	}
-	// Light flowing in from the surrounding columns.
-	border := func(x, z int) {
-		if inRegion(x, z) {
+	// Light flowing in from the surrounding cells: the columns around the
+	// region and the layers just above and below it.
+	seed := func(x, y, z int) {
+		if y < 0 || y >= worldH || inRegion(x, y, z) {
 			return
 		}
-		for y := 0; y < worldH; y++ {
-			if w.Light[cellIndex(x, y, z)] != 0 {
-				queue = append(queue, int32(cellIndex(x, y, z)))
-			}
+		if w.Light[cellIndex(x, y, z)] != 0 {
+			queue = append(queue, int32(cellIndex(x, y, z)))
 		}
 	}
 	if x1-x0 < worldW || z1-z0 < worldD {
-		for x := x0 - 1; x <= x1; x++ {
-			border(x, z0-1)
-			border(x, z1)
+		for y := y0 - 1; y <= y1; y++ {
+			for x := x0 - 1; x <= x1; x++ {
+				seed(x, y, z0-1)
+				seed(x, y, z1)
+			}
+			for z := z0; z < z1; z++ {
+				seed(x0-1, y, z)
+				seed(x1, y, z)
+			}
 		}
-		for z := z0; z < z1; z++ {
-			border(x0-1, z)
-			border(x1, z)
+	}
+	for z := z0; z < z1; z++ {
+		for x := x0; x < x1; x++ {
+			seed(x, y0-1, z)
+			seed(x, y1, z)
 		}
 	}
 	// Torches.
-	for y := 0; y < worldH; y++ {
+	for y := y0; y < y1; y++ {
 		for z := z0; z < z1; z++ {
 			for x := x0; x < x1; x++ {
-				if e := blocks[w.getLocal(x, y, z)].Emit; e > 0 {
+				if e := blocks[w.getLocal(wrapX(x), y, wrapZ(z))].Emit; e > 0 {
 					i := cellIndex(x, y, z)
 					w.Light[i] = w.Light[i]&0xf0 | e
 					queue = append(queue, int32(i))
@@ -604,7 +636,7 @@ func (w *World) relightRegion(x0, z0, x1, z1 int) {
 		}
 		for _, d := range dirs {
 			nx, ny, nz := wrapX(x+d[0]), y+d[1], wrapZ(z+d[2])
-			if ny < 0 || ny >= worldH || !inRegion(nx, nz) {
+			if !inRegion(nx, ny, nz) {
 				continue
 			}
 			cost := int(w.getLocal(nx, ny, nz).lightCost())
@@ -622,7 +654,7 @@ func (w *World) relightRegion(x0, z0, x1, z1 int) {
 	}
 	// Re-mesh every chunk whose light changed.
 	k := 0
-	for y := 0; y < worldH; y++ {
+	for y := y0; y < y1; y++ {
 		for z := z0; z < z1; z++ {
 			for x := x0; x < x1; x++ {
 				if old[k] != w.Light[cellIndex(x, y, z)] {
@@ -634,36 +666,50 @@ func (w *World) relightRegion(x0, z0, x1, z1 int) {
 	}
 }
 
-// flushLight recomputes lighting around every chunk edited since the last frame.
+// editBox is the span of cells edited in one chunk since the last relight (local coordinates).
+type editBox struct{ x0, y0, z0, x1, y1, z1 int }
+
+// lightAlike reports whether swapping one block for the other leaves every
+// light calculation the same: same cost to pass through, same emission and
+// the same effect on a column of sunlight.
+func lightAlike(a, b Block) bool {
+	sunA, sunB := a == Air || blocks[a].Tiny, b == Air || blocks[b].Tiny
+	return a.lightCost() == b.lightCost() && blocks[a].Emit == blocks[b].Emit && sunA == sunB
+}
+
+var relightCalls, relightCells int // profiling counters for the PERF log
+
+// flushLight recomputes lighting around every cell edited since the last
+// frame. Edits in nearby chunks are merged into one region; each region is
+// the edits' bounding box grown by the 15 blocks light can travel, in height
+// as well, so a leaf growing on one tree does not relight three chunks of sky.
 func (w *World) flushLight() {
 	if len(w.relight) == 0 {
 		return
 	}
-	// Relight each dirty chunk with a one-chunk margin (light reaches 15
-	// blocks), merging only chunks that are close together. Scattered edits
-	// (tree growth across the map) must not collapse into one world-sized box.
 	done := map[int]bool{}
-	for ci := range w.relight {
+	for ci, box := range w.relight {
 		if done[ci] {
 			continue
 		}
 		i, j := ci%w.ncx, ci/w.ncx
-		cx0, cz0, cx1, cz1 := i, j, i, j
-		for cj := range w.relight {
+		u := *box
+		for cj, bj := range w.relight {
 			if done[cj] {
 				continue
 			}
 			ii, jj := cj%w.ncx, cj/w.ncx
 			if abs(ii-i) <= 2 && abs(jj-j) <= 2 {
-				cx0, cz0 = min(cx0, ii), min(cz0, jj)
-				cx1, cz1 = max(cx1, ii), max(cz1, jj)
+				u.x0, u.y0, u.z0 = min(u.x0, bj.x0), min(u.y0, bj.y0), min(u.z0, bj.z0)
+				u.x1, u.y1, u.z1 = max(u.x1, bj.x1), max(u.y1, bj.y1), max(u.z1, bj.z1)
 				done[cj] = true
 			}
 		}
 		done[ci] = true
-		w.relightRegion((cx0-1)*chunkSize, (cz0-1)*chunkSize, (cx1+2)*chunkSize, (cz1+2)*chunkSize)
+		const reach = 16
+		w.relightRegion(u.x0-reach, u.z0-reach, u.x1+reach, u.z1+reach, max(0, u.y0-reach), min(worldH, u.y1+reach))
 	}
-	w.relight = map[int]bool{}
+	w.relight = map[int]*editBox{}
 }
 
 // ---------- generation ----------
@@ -1247,9 +1293,12 @@ func (w *World) leafFor(lx, y, lz int, log Block) Block {
 
 // RegrowTrees gives damaged trees their leaves back and lets oaks bear fruit.
 // It samples a slice of the world each call so the cost stays small.
-func (w *World) RegrowTrees(slice, slices int) (grown int) {
+func (w *World) RegrowTrees(slice, slices, limit int) (grown int) {
 	for lz := slice; lz < worldD; lz += slices {
 		for lx := 0; lx < worldW; lx++ {
+			if grown >= limit {
+				return grown // a few leaves per tick: each one costs a relight
+			}
 			top := w.Height[lz*worldW+lx]
 			for y := 2; y < top; y++ {
 				b := w.getLocal(lx, y, lz)
@@ -1458,11 +1507,23 @@ func (w *World) Set(x, y, z int, b Block) {
 	if !inLocal(lx, y, lz) {
 		return
 	}
+	old := w.Blocks[(y*worldD+lz)*worldW+lx]
 	w.Blocks[(y*worldD+lz)*worldW+lx] = b
 	w.recomputeHeight(lx, lz)
 	w.Version++
 	cx, cz := lx/chunkSize, lz/chunkSize
-	w.relight[cz*w.ncx+cx] = true
+	if !lightAlike(old, b) {
+		// Only changes that can alter light queue a relight; grass turning to
+		// dirt or wheat ripening just re-mesh.
+		eb := w.relight[cz*w.ncx+cx]
+		if eb == nil {
+			eb = &editBox{lx, y, lz, lx + 1, y + 1, lz + 1}
+			w.relight[cz*w.ncx+cx] = eb
+		} else {
+			eb.x0, eb.y0, eb.z0 = min(eb.x0, lx), min(eb.y0, y), min(eb.z0, lz)
+			eb.x1, eb.y1, eb.z1 = max(eb.x1, lx+1), max(eb.y1, y+1), max(eb.z1, lz+1)
+		}
+	}
 	if w.OnSet != nil {
 		w.OnSet(lx+originX, y, lz+originZ, b)
 	}
@@ -1917,9 +1978,8 @@ void main() {
 
 // loadAtlas builds the block atlas for the current art style and uploads it.
 func (w *World) loadAtlas() {
-	img := rl.NewImageFromImage(buildAtlas())
-	w.tex = rl.LoadTextureFromImage(img)
-	rl.UnloadImage(img)
+	atlas := buildAtlas()
+	w.tex = rl.LoadTextureFromImage(rl.NewImage(atlas.Pix, int32(atlas.Rect.Dx()), int32(atlas.Rect.Dy()), 1, rl.UncompressedR8g8b8a8))
 	rl.GenTextureMipmaps(&w.tex)
 	if settings.Style == StylePixel {
 		// Crisp pixels up close, mipmapped in the distance so far-off blocks stop shimmering.

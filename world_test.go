@@ -1056,7 +1056,7 @@ func TestRegrowthAndAsteroid(t *testing.T) {
 	w.flushLight()
 	grown := 0
 	for i := 0; i < 64; i++ {
-		grown += w.RegrowTrees(i%16, 16)
+		grown += w.RegrowTrees(i%16, 16, 1<<30)
 		w.flushLight()
 	}
 	if grown == 0 {

@@ -718,9 +718,9 @@ func (s *Skins) init(w *World) {
 	if s.ready {
 		return
 	}
-	img := rl.NewImageFromImage(buildSkinAtlas())
-	s.tex = rl.LoadTextureFromImage(img)
-	rl.UnloadImage(img)
+	atlas := buildSkinAtlas()
+	img := rl.NewImage(atlas.Pix, int32(atlas.Rect.Dx()), int32(atlas.Rect.Dy()), 1, rl.UncompressedR8g8b8a8)
+	s.tex = rl.LoadTextureFromImage(img) // img points at Go memory: nothing to unload
 	rl.GenTextureMipmaps(&s.tex)
 	rl.TextureParameters(s.tex.ID, rl.TextureMinFilter, rl.TextureFilterNearestMipLinear)
 	rl.TextureParameters(s.tex.ID, rl.TextureMagFilter, 0x2600)

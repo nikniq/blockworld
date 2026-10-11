@@ -8,8 +8,6 @@ import (
 	_ "embed"
 	"flag"
 	"fmt"
-	"image"
-	"image/color"
 	"math"
 	"math/rand"
 	"os"
@@ -177,6 +175,7 @@ type Game struct {
 	NewHigh   bool
 
 	mapTex rl.Texture2D
+	mapPix []byte // RGBA pixels of the minimap, reused between refreshes
 	mapOK  bool
 	mapVer int
 	mapCD  float32
@@ -1163,7 +1162,7 @@ func (g *Game) soak(frame int) bool {
 		}
 		g.raids(0.1)
 		g.asteroidImpact(rl.Vector3Add(p.Pos, rl.NewVector3(12, 0, 0)))
-		g.World.RegrowTrees(0, 1)
+		g.World.RegrowTrees(0, 1, 1<<30)
 	}
 	if frame%650 == 0 {
 		for _, d := range g.Dragons {
@@ -1419,7 +1418,7 @@ func (g *Game) tickRegrow(dt float32) {
 		return
 	}
 	g.RegrowCD = 2.5
-	g.World.RegrowTrees(g.RegrowSlice, 16)
+	g.World.RegrowTrees(g.RegrowSlice, 16, 40)
 	g.RegrowSlice = (g.RegrowSlice + 1) % 16
 }
 
@@ -2897,7 +2896,13 @@ func (g *Game) refreshMinimap(dt float32) {
 	}
 	g.mapCD = 0.5
 	g.mapVer = w.Version
-	img := image.NewRGBA(image.Rect(0, 0, worldW, worldD))
+	if g.mapPix == nil || len(g.mapPix) != worldW*worldD*4 {
+		g.mapPix = make([]byte, worldW*worldD*4)
+		if g.mapOK {
+			rl.UnloadTexture(g.mapTex)
+			g.mapOK = false
+		}
+	}
 	for lz := 0; lz < worldD; lz++ {
 		for lx := 0; lx < worldW; lx++ {
 			h := w.Height[lz*worldW+lx]
@@ -2909,15 +2914,16 @@ func (g *Game) refreshMinimap(dt float32) {
 			}
 			s := 0.5 + 0.5*float32(h-groundBase)/36
 			c = mul(c, s)
-			img.SetRGBA(lx, lz, color.RGBA{c.R, c.G, c.B, 255})
+			o := (lz*worldW + lx) * 4
+			g.mapPix[o], g.mapPix[o+1], g.mapPix[o+2], g.mapPix[o+3] = c.R, c.G, c.B, 255
 		}
 	}
-	ri := rl.NewImageFromImage(img)
+	// One upload of the whole image rather than a cgo call per pixel.
 	if g.mapOK {
-		rl.UnloadTexture(g.mapTex)
+		rl.UpdateTexture(g.mapTex, g.mapPix)
+		return
 	}
-	g.mapTex = rl.LoadTextureFromImage(ri)
-	rl.UnloadImage(ri)
+	g.mapTex = rl.LoadTextureFromImage(rl.NewImage(g.mapPix, int32(worldW), int32(worldD), 1, rl.UncompressedR8g8b8a8))
 	rl.SetTextureFilter(g.mapTex, rl.FilterPoint)
 	g.mapOK = true
 }
@@ -4043,7 +4049,7 @@ func main() {
 		}
 	}
 	if shots || soak || bench {
-		rl.TraceLog(rl.LogInfo, "PERF: frames=%d avgFPS=%.1f lastChunks=%d lastVerts=%dk", perfFrames, float32(perfFrames)/max(perfSeconds, 0.001), renderStats.Chunks, renderStats.Verts/1000)
+		rl.TraceLog(rl.LogInfo, "PERF: frames=%d avgFPS=%.1f lastChunks=%d lastVerts=%dk relights=%d cols=%dk ver=%d", perfFrames, float32(perfFrames)/max(perfSeconds, 0.001), renderStats.Chunks, renderStats.Verts/1000, relightCalls, relightCells/1000, g.World.Version)
 	}
 	if g.State != StateMenu && !shots && !soak && !bench {
 		g.leaveWorld() // closing the window keeps the world
