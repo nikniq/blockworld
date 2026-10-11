@@ -3005,6 +3005,8 @@ func (g *Game) updateSettings() {
 		settings.Difficulty = (settings.Difficulty + 1) % 3
 	case rl.IsKeyPressed(rl.KeyA):
 		settings.Antialias = !settings.Antialias
+	case rl.IsKeyPressed(rl.KeyO):
+		settings.Ink = !settings.Ink
 	case rl.IsKeyPressed(rl.KeyV):
 		settings.Quality = (settings.Quality + 1) % 3
 	case rl.IsKeyPressed(rl.KeyN):
@@ -3114,7 +3116,11 @@ func (g *Game) drawOverlay() {
 		if settings.Antialias {
 			aa = "on"
 		}
-		centered(fmt.Sprintf("N  music  %s      A  anti-aliasing  %s      V  graphics quality  %s      K (in game)  achievements %d/%d", music, aa, qualityNames[settings.Quality], g.achievementCount(), int(numAch)), sh/2+226, 20, rl.White)
+		ink := "off"
+		if settings.Ink {
+			ink = "on"
+		}
+		centered(fmt.Sprintf("N  music  %s      A  anti-aliasing  %s      O  ink outlines  %s      V  graphics quality  %s      K (in game)  achievements %d/%d", music, aa, ink, qualityNames[settings.Quality], g.achievementCount(), int(numAch)), sh/2+226, 20, rl.White)
 	case StateGameOver:
 		centered("YOU DIED", sh/2-120, 64, rl.Red)
 		if g.Player.Cause != "" {
@@ -3991,7 +3997,7 @@ func main() {
 		g.updateMusic()
 
 		rl.BeginDrawing()
-		usePost := (settings.Antialias || quality().RenderScale < 1) && postfx.begin()
+		usePost := (settings.Antialias || settings.Ink || quality().RenderScale < 1) && postfx.begin()
 		rl.ClearBackground(g.Sky.Color())
 		g.draw3D()
 		if usePost {

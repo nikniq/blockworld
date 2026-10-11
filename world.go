@@ -349,6 +349,7 @@ func (b Block) Liquid() bool { return b == Water || b == Lava }
 type meshBuf struct {
 	mesh   rl.Mesh
 	loaded bool
+	wobble bool // terrain: block corners are nudged so nothing is perfectly straight
 	verts  []float32
 	norms  []float32
 	uvs    []float32
@@ -415,6 +416,7 @@ type World struct {
 	locTile   int32
 	locScrol  int32
 	locWater  int32
+	locCel    int32
 	elocView  int32
 	elocFog   int32
 	elocFogS  int32
@@ -474,7 +476,7 @@ func newEmptyWorld() *World {
 	for i := 0; i < w.ncx*w.ncz; i++ {
 		c := &chunk{dirty: true, ci: i % w.ncx, cj: i / w.ncx}
 		for k := 0; k < chunkSections; k++ {
-			c.opaque[k], c.trans[k] = &meshBuf{}, &meshBuf{}
+			c.opaque[k], c.trans[k] = &meshBuf{wobble: true}, &meshBuf{wobble: true}
 		}
 		w.chunks = append(w.chunks, c)
 	}
@@ -1560,6 +1562,9 @@ func (m *meshBuf) emitFaceUV(f *faceDef, u0, v0, u1, v1, x, y, z float32, box [2
 		pos[k][0] += x
 		pos[k][1] += y
 		pos[k][2] += z
+		if m.wobble {
+			wobbleCorner(&pos[k])
+		}
 		uv[k] = [2]float32{lerp(u0, u1, (su+1)/2), lerp(v0, v1, (1-sv)/2)}
 		bright := 0.55 + 0.45*float32(ao[k])/3
 		shade[k] = uint8(clamp(f.shade*tint*bright*255, 0, 255))
@@ -1574,6 +1579,25 @@ func (m *meshBuf) emitFaceUV(f *faceDef, u0, v0, u1, v1, x, y, z float32, box [2
 		m.uvs = append(m.uvs, uv[i][0], uv[i][1])
 		m.cols = append(m.cols, uint8(light[i].sun*255), uint8(light[i].blk*255), shade[i], 255)
 	}
+}
+
+// wobbleAmp is how far (in blocks) a block corner may be nudged off its grid
+// position for the hand-drawn look.
+const wobbleAmp = 0.075
+
+// wobbleCorner nudges a whole-block corner by an offset hashed from its world
+// position, so every face that meets there moves together and the mesh stays
+// sealed across chunk and wrap seams. Corners inside a cell (torches, beds,
+// ladders) are left alone.
+func wobbleCorner(p *[3]float32) {
+	ix, iy, iz := floorI(p[0]), floorI(p[1]), floorI(p[2])
+	if float32(ix) != p[0] || float32(iy) != p[1] || float32(iz) != p[2] {
+		return
+	}
+	wx, wz := wrapX(ix-originX), wrapZ(iz-originZ)
+	p[0] += (hash2(wx, iy*977+wz, 601) - 0.5) * 2 * wobbleAmp
+	p[1] += (hash2(wx, iy*977+wz, 602) - 0.5) * 2 * wobbleAmp
+	p[2] += (hash2(wx, iy*977+wz, 603) - 0.5) * 2 * wobbleAmp
 }
 
 // biomeTintCode returns the vertex-alpha code the shader turns into a biome
@@ -1810,7 +1834,14 @@ uniform float flicker;
 uniform vec4 tileInfo;    // atlas cell size (xy) and the padding offset to the tile inside it (zw), in uv units
 uniform vec2 uvScroll;    // water animation, in tile units (0 for the opaque pass)
 uniform float water;      // 1 in the translucent pass
+uniform float cel;        // 0..1: how far lighting is quantised into bands
 out vec4 finalColor;
+// band snaps a lighting level to one of a few steps with a soft edge between them.
+float band(float v) {
+    float s = 4.0;
+    float q = floor(v * s) / s;
+    return mix(q, q + 1.0 / s, smoothstep(0.3, 0.7, fract(v * s)));
+}
 void main() {
     vec2 uv = fragTexCoord;
     if (uvScroll != vec2(0.0)) {
@@ -1844,6 +1875,11 @@ void main() {
     float bb = 0.97 * pow(blk, 1.4); // torchlight falls off more gently than sunlight
     vec3 torchTint = vec3(1.15, 0.98, 0.72); // warm and a touch over-bright up close
     vec3 lit = max(sunTint * bs, torchTint * bb);
+    if (cel > 0.0) {
+        float lv = max(bs, bb);
+        float bl = mix(lv, band(lv), cel);
+        lit *= bl / max(lv, 0.001);
+    }
     vec3 rgb = t.rgb * fragColor.b * colDiffuse.b * lit;
     if (water > 0.5) {
         // More reflective (opaque) at grazing angles, clearer looking straight down.
@@ -1907,6 +1943,7 @@ func (w *World) initGPU() {
 		w.locTile = rl.GetShaderLocation(w.shader, "tileInfo")
 		w.locScrol = rl.GetShaderLocation(w.shader, "uvScroll")
 		w.locWater = rl.GetShaderLocation(w.shader, "water")
+		w.locCel = rl.GetShaderLocation(w.shader, "cel")
 		aw, ah := float32(atlasTiles*atlasCell), float32(atlasRows*atlasCell)
 		rl.SetShaderValue(w.shader, w.locTile, []float32{atlasCell / aw, atlasCell / ah, atlasPad / aw, atlasPad / ah}, rl.ShaderUniformVec4)
 		w.elocView = rl.GetShaderLocation(w.eshader, "viewPos")
@@ -1964,6 +2001,11 @@ func (w *World) SetEnv(cam rl.Camera3D, env Env) {
 	rl.SetShaderValue(w.shader, w.locFlick, []float32{env.Flicker}, rl.ShaderUniformFloat)
 	rl.SetShaderValue(w.shader, w.locScrol, []float32{0, 0}, rl.ShaderUniformVec2)
 	rl.SetShaderValue(w.shader, w.locWater, []float32{0}, rl.ShaderUniformFloat)
+	cel := float32(0)
+	if settings.Ink {
+		cel = 0.7
+	}
+	rl.SetShaderValue(w.shader, w.locCel, []float32{cel}, rl.ShaderUniformFloat)
 	w.envTime = env.Time
 	w.envFogEnd = env.FogEnd
 	rl.SetShaderValue(w.eshader, w.elocView, []float32{cam.Position.X, cam.Position.Y, cam.Position.Z}, rl.ShaderUniformVec3)

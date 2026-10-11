@@ -157,6 +157,12 @@ block textures and sound effects are generated at startup.
   hand-painted-looking wash: broad light and dark tones, a drift between warmer and cooler hues, brush
   strokes along the grain, and soft gradient seams for planks, bricks and cobbles instead of hard pixel
   lines. The atlas is filtered trilinearly so the brushwork blends up close and stays calm at a distance.
+- **Sketched world**: no block is perfectly straight. Every block corner is nudged a little by a hash
+  of its position, so faces lean and edges wander like a hand-built illustration while the mesh stays
+  sealed and collision stays cubic. A depth-aware ink pass draws dark outlines along silhouettes and
+  creases (block tops meeting sides, creatures against the sky), fading with distance so far hills stay
+  clean, and the lighting is quantised into soft bands like cel shading. O on the pause screen toggles
+  the ink and banding.
 - Blocks have ambient occlusion and smooth lighting, fog, drifting clouds, stars and a sun and moon.
   The scene is anti-aliased with an FXAA pass and finished with a soft vignette (A on the pause screen
   toggles it). Plants are crossed quads rather than boxes, faces brighten as they turn toward the sun
