@@ -161,8 +161,10 @@ block textures and sound effects are generated at startup.
   of its position, so faces lean and edges wander like a hand-built illustration while the mesh stays
   sealed and collision stays cubic. A depth-aware ink pass draws dark outlines along silhouettes and
   creases (block tops meeting sides, creatures against the sky), fading with distance so far hills stay
-  clean, and the lighting is quantised into soft bands like cel shading. O on the pause screen toggles
-  the ink and banding.
+  clean, and the lighting is quantised into soft bands like cel shading.
+- **Three art styles**, switched live with O on the pause screen: **Pixel** is the original 16x16
+  pixel-art look with straight blocks and nearest filtering; **Painterly** uses the brushed 64x64
+  atlas; **Sketched** (the default) adds the wobble, ink outlines and banded light.
 - Blocks have ambient occlusion and smooth lighting, fog, drifting clouds, stars and a sun and moon.
   The scene is anti-aliased with an FXAA pass and finished with a soft vignette (A on the pause screen
   toggles it). Plants are crossed quads rather than boxes, faces brighten as they turn toward the sun
@@ -277,12 +279,34 @@ A `Makefile` with `run`, `build`, `build-macos`, `build-linux` and `build-window
 
 ### If it runs slowly
 
+The game watches its own frame rate. After about six seconds below 24 FPS it steps the graphics
+quality down one level, and once at Low it switches the art style from Sketched to Painterly (which
+drops the ink outline pass), saying so on screen each time. You can also do it by hand: press Esc, then
+
+- **V** cycles graphics quality. Low renders the scene at half the window's pixel size, draws 72
+  blocks out, skips clouds and keeps distant creatures off screen. Medium is the default on Linux and
+  Windows; High on macOS.
+- **O** cycles the art style. Pixel (the original 16x16 look, straight blocks, no post-processing) is
+  the cheapest; Painterly adds the 64x64 brushed atlas; Sketched adds wobbled corners, ink outlines
+  and banded light, which costs one full-screen depth pass.
+- **A** turns anti-aliasing off.
+- On the title screen, **W** picks a smaller world. Fewer chunks means less to light and build.
+
+On Fedora and other Linux desktops the usual culprits are outside the game:
+
+- Software rendering. `glxinfo -B | grep -i renderer` should name your GPU; if it says `llvmpipe`,
+  the Mesa driver for your card is missing (`sudo dnf install mesa-dri-drivers`, or the NVIDIA driver
+  from RPM Fusion) and no setting will help much until it is fixed.
+- HiDPI scaling. The game renders at the framebuffer size, so a 200% scaled 4K display is four
+  times the pixels of 1080p. Run it in a smaller window, or at Low quality which halves the render size.
+- Wayland. If the frame rate is uneven, try an X11 session from the login screen; GLFW's Wayland
+  path on some Mesa versions stalls on vsync.
+- Power saving on laptops: plug in or set the power profile to performance.
+
 `BLOCKWORLD_BENCH=1 ./blockworld` flies a lap over a new world and logs the average frame rate (with
-`BLOCKWORLD_QUALITY=0|1|2` to test a level). Press Esc and use **V** to switch graphics quality. Low renders the scene at half the window's pixel
-size, draws 80 blocks out, skips clouds and keeps distant creatures off screen; Medium is the default
-on Linux and Windows; High is the default on macOS. Chunk meshes now stream in a few per frame rather
-than all at once. **F3** shows an overlay with the frame rate, chunks and vertices drawn, framebuffer
-size and quality, which is useful when reporting a slow machine.
+`BLOCKWORLD_QUALITY=0|1|2` to test a level). Chunk meshes stream in a few per frame rather than all
+at once. **F3** shows an overlay with the frame rate, chunks and vertices drawn, framebuffer size and
+quality, which is useful when reporting a slow machine.
 
 ### Packaging as an app with an icon
 

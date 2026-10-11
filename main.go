@@ -103,6 +103,8 @@ type Game struct {
 	Quake       Quake
 	QuakeCD     float32
 	Faults      []Fault
+	lagT        float32 // seconds of slow frames seen lately
+	lagGrace    float32 // seconds before the frame rate is judged (world loads are slow)
 	AsteroidCD  float32
 	RegrowCD    float32
 	RegrowSlice int
@@ -255,6 +257,7 @@ func (g *Game) Reset() {
 	g.Quake = Quake{}
 	g.QuakeCD = quakeEvery * 0.7
 	g.Faults = nil
+	g.lagGrace = 15
 	g.AsteroidCD = asteroidEvery * 0.5
 	g.say("Day 1  -  mine, craft and build before dark. Find and light the ancient beacon.", 5)
 }
@@ -3006,7 +3009,10 @@ func (g *Game) updateSettings() {
 	case rl.IsKeyPressed(rl.KeyA):
 		settings.Antialias = !settings.Antialias
 	case rl.IsKeyPressed(rl.KeyO):
-		settings.Ink = !settings.Ink
+		settings.Style = (settings.Style + 1) % numStyles
+		if g.World != nil {
+			g.World.Restyle()
+		}
 	case rl.IsKeyPressed(rl.KeyV):
 		settings.Quality = (settings.Quality + 1) % 3
 	case rl.IsKeyPressed(rl.KeyN):
@@ -3116,11 +3122,7 @@ func (g *Game) drawOverlay() {
 		if settings.Antialias {
 			aa = "on"
 		}
-		ink := "off"
-		if settings.Ink {
-			ink = "on"
-		}
-		centered(fmt.Sprintf("N  music  %s      A  anti-aliasing  %s      O  ink outlines  %s      V  graphics quality  %s      K (in game)  achievements %d/%d", music, aa, ink, qualityNames[settings.Quality], g.achievementCount(), int(numAch)), sh/2+226, 20, rl.White)
+		centered(fmt.Sprintf("N  music  %s      A  anti-aliasing  %s      O  art style  %s      V  graphics quality  %s      K (in game)  achievements %d/%d", music, aa, styleNames[settings.Style], qualityNames[settings.Quality], g.achievementCount(), int(numAch)), sh/2+226, 20, rl.White)
 	case StateGameOver:
 		centered("YOU DIED", sh/2-120, 64, rl.Red)
 		if g.Player.Cause != "" {
@@ -3620,6 +3622,12 @@ func (g *Game) scriptedShots(frame int) bool {
 	case 234:
 		g.Player.DmgFlash = 0
 		rl.TakeScreenshot("shot_closeup.png")
+		settings.Style = StylePixel // the classic look of the same scene
+		g.World.Restyle()
+	case 236:
+		rl.TakeScreenshot("shot_pixel.png")
+		settings.Style = StyleSketched
+		g.World.Restyle()
 	case 235:
 		g.Asteroid = Asteroid{Target: rl.Vector3Add(g.Player.Pos, rl.NewVector3(20, 0, -20)), T: 6, Active: true}
 		g.Player.Pitch = 0.35
@@ -3806,6 +3814,7 @@ func main() {
 	soak := os.Getenv("BLOCKWORLD_SOAK") != ""
 	netTest := os.Getenv("BLOCKWORLD_NETTEST")   // "host" or "client": scripted multiplayer check
 	bench := os.Getenv("BLOCKWORLD_BENCH") != "" // fly a lap over the terrain and report the frame rate
+	autoTune = !shots && !soak && !bench         // harness runs measure or stage frames; do not retune under them
 	if netTest != "" {
 		rl.SetTargetFPS(60)
 		g.Net = &Net{Name: "Tester-" + netTest}
@@ -3997,7 +4006,7 @@ func main() {
 		g.updateMusic()
 
 		rl.BeginDrawing()
-		usePost := (settings.Antialias || settings.Ink || quality().RenderScale < 1) && postfx.begin()
+		usePost := (settings.Antialias || styleInk() || quality().RenderScale < 1) && postfx.begin()
 		rl.ClearBackground(g.Sky.Color())
 		g.draw3D()
 		if usePost {
@@ -4030,6 +4039,7 @@ func main() {
 		if g.State == StatePlaying {
 			perfFrames++
 			perfSeconds += rl.GetFrameTime()
+			g.autoQuality(rl.GetFrameTime())
 		}
 	}
 	if shots || soak || bench {
@@ -4053,5 +4063,42 @@ func (g *Game) leaveWorld() {
 		g.Net.listener.Close()
 		g.Net.broadcast(&Msg{Leave: &struct{ ID uint32 }{0}}, 0)
 		g.Net = nil
+	}
+}
+
+// autoTune lets the game lower its own graphics settings when frames run slow.
+var autoTune = true
+
+// autoQuality watches for a sustained low frame rate while playing and steps
+// the graphics quality down, then the ink pass off, telling the player how
+// to change it back. World loads and respawns get a grace period because
+// their chunk builds are slow by design.
+func (g *Game) autoQuality(dt float32) {
+	if !autoTune || g.World == nil {
+		return
+	}
+	if g.lagGrace > 0 {
+		g.lagGrace -= dt
+		return
+	}
+	if dt > 1.0/24 {
+		g.lagT += dt
+	} else {
+		g.lagT = max(0, g.lagT-dt*0.5)
+	}
+	if g.lagT < 6 {
+		return
+	}
+	g.lagT, g.lagGrace = 0, 10
+	switch {
+	case settings.Quality > 0:
+		settings.Quality--
+		settings.save()
+		g.say(fmt.Sprintf("Frame rate is low: graphics quality set to %s  (Esc, then V to change)", qualityNames[settings.Quality]), 7)
+	case settings.Style == StyleSketched:
+		settings.Style = StylePainterly
+		g.World.Restyle()
+		settings.save()
+		g.say("Frame rate is low: ink outlines turned off  (Esc, then O to change)", 7)
 	}
 }

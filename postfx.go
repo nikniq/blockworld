@@ -180,7 +180,7 @@ func (p *PostFX) end() {
 	rl.SetShaderValue(p.shader, p.locRes, []float32{float32(p.w), float32(p.h)}, rl.ShaderUniformVec2)
 	rl.SetShaderValue(p.shader, p.locClip, []float32{float32(rl.GetCullDistanceNear()), float32(rl.GetCullDistanceFar())}, rl.ShaderUniformVec2)
 	ink, aa := float32(0), float32(0)
-	if settings.Ink && p.target.Depth.ID != 0 {
+	if styleInk() && p.target.Depth.ID != 0 {
 		ink = 1
 	}
 	if settings.Antialias {

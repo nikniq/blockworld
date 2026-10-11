@@ -1562,7 +1562,7 @@ func (m *meshBuf) emitFaceUV(f *faceDef, u0, v0, u1, v1, x, y, z float32, box [2
 		pos[k][0] += x
 		pos[k][1] += y
 		pos[k][2] += z
-		if m.wobble {
+		if m.wobble && styleWobble() {
 			wobbleCorner(&pos[k])
 		}
 		uv[k] = [2]float32{lerp(u0, u1, (su+1)/2), lerp(v0, v1, (1-sv)/2)}
@@ -1915,17 +1915,50 @@ void main() {
     finalColor = vec4(mix(c.rgb, fogColor, f), c.a);
 }`
 
-func (w *World) initGPU() {
-	w.gpu = true
+// loadAtlas builds the block atlas for the current art style and uploads it.
+func (w *World) loadAtlas() {
 	img := rl.NewImageFromImage(buildAtlas())
 	w.tex = rl.LoadTextureFromImage(img)
 	rl.UnloadImage(img)
-	// Painterly tiles are meant to blur softly: trilinear filtering, so the
-	// brushwork blends up close and far-off blocks stop shimmering.
 	rl.GenTextureMipmaps(&w.tex)
-	rl.TextureParameters(w.tex.ID, rl.TextureMinFilter, 0x2703) // GL_LINEAR_MIPMAP_LINEAR
-	rl.TextureParameters(w.tex.ID, rl.TextureMagFilter, rl.TextureFilterLinear)
+	if settings.Style == StylePixel {
+		// Crisp pixels up close, mipmapped in the distance so far-off blocks stop shimmering.
+		rl.TextureParameters(w.tex.ID, rl.TextureMinFilter, rl.TextureFilterNearestMipLinear)
+		rl.TextureParameters(w.tex.ID, rl.TextureMagFilter, 0x2600) // GL_NEAREST
+	} else {
+		// Painterly tiles are meant to blur softly: trilinear filtering.
+		rl.TextureParameters(w.tex.ID, rl.TextureMinFilter, 0x2703) // GL_LINEAR_MIPMAP_LINEAR
+		rl.TextureParameters(w.tex.ID, rl.TextureMagFilter, rl.TextureFilterLinear)
+	}
+	w.mat.GetMap(rl.MapDiffuse).Texture = w.tex
+	if w.shaderOK {
+		aw, ah := float32(atlasTiles*atlasCell), float32(atlasRows*atlasCell)
+		rl.SetShaderValue(w.shader, w.locTile, []float32{float32(atlasCell) / aw, float32(atlasCell) / ah, atlasPad / aw, atlasPad / ah}, rl.ShaderUniformVec4)
+	}
+}
+
+// Restyle switches the art style on a live world: a new atlas, fresh item
+// cube meshes (their texture rectangles moved) and every chunk rebuilt, all
+// in view at once so the world does not fill in piecemeal.
+func (w *World) Restyle() {
+	if w.gpu {
+		rl.UnloadTexture(w.tex)
+		w.loadAtlas()
+		for _, m := range w.blockM {
+			m.free()
+		}
+		w.blockM = map[Block]*meshBuf{}
+	}
+	for _, c := range w.chunks {
+		c.dirty = true
+	}
+	w.warmed = false
+}
+
+func (w *World) initGPU() {
+	w.gpu = true
 	w.mat = rl.LoadMaterialDefault()
+	w.loadAtlas()
 	w.mat.GetMap(rl.MapDiffuse).Texture = w.tex
 	w.shader = rl.LoadShaderFromMemory(vertexShader, terrainFragment)
 	w.eshader = rl.LoadShaderFromMemory(vertexShader, entityFragment)
@@ -1945,7 +1978,7 @@ func (w *World) initGPU() {
 		w.locWater = rl.GetShaderLocation(w.shader, "water")
 		w.locCel = rl.GetShaderLocation(w.shader, "cel")
 		aw, ah := float32(atlasTiles*atlasCell), float32(atlasRows*atlasCell)
-		rl.SetShaderValue(w.shader, w.locTile, []float32{atlasCell / aw, atlasCell / ah, atlasPad / aw, atlasPad / ah}, rl.ShaderUniformVec4)
+		rl.SetShaderValue(w.shader, w.locTile, []float32{float32(atlasCell) / aw, float32(atlasCell) / ah, atlasPad / aw, atlasPad / ah}, rl.ShaderUniformVec4)
 		w.elocView = rl.GetShaderLocation(w.eshader, "viewPos")
 		w.elocFog = rl.GetShaderLocation(w.eshader, "fogColor")
 		w.elocFogS = rl.GetShaderLocation(w.eshader, "fogStart")
@@ -2002,7 +2035,7 @@ func (w *World) SetEnv(cam rl.Camera3D, env Env) {
 	rl.SetShaderValue(w.shader, w.locScrol, []float32{0, 0}, rl.ShaderUniformVec2)
 	rl.SetShaderValue(w.shader, w.locWater, []float32{0}, rl.ShaderUniformFloat)
 	cel := float32(0)
-	if settings.Ink {
+	if styleInk() {
 		cel = 0.7
 	}
 	rl.SetShaderValue(w.shader, w.locCel, []float32{cel}, rl.ShaderUniformFloat)

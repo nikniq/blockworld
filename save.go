@@ -217,5 +217,6 @@ func (g *Game) load() bool {
 		g.Animals = append(g.Animals, a)
 	}
 	g.say("World loaded", 2)
+	g.lagGrace = 15
 	return true
 }
